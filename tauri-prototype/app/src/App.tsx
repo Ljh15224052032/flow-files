@@ -1,0 +1,3785 @@
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type UIEvent } from "react";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
+import brandIcon from "../src-tauri/icons/flow-files.svg";
+import "./App.css";
+
+type FileEntry = { name: string; path: string; isDirectory: boolean; size: number; modifiedUnixSeconds: number | null; extension: string | null; isHidden: boolean; isLink: boolean; linkTarget: string | null };
+type FavoriteItem = { path: string; label: string | null; group: string | null };
+type DirectoryListing = { path: string; entries: FileEntry[]; folderCount: number; fileCount: number };
+type Location = { label: string; path: string; totalSpace: number | null; availableSpace: number | null; isAvailable: boolean };
+type FolderTab = { id: number; path: string; label: string; pinned: boolean; history: string[]; historyIndex: number; scrollTop: number; viewMode: ViewMode; selectedPaths: string[] };
+type Thumbnail = { path: string; dataUrl: string };
+type FilePreview = { kind: "image" | "text" | "pdf" | "svg" | "heic" | "audio" | "video" | "office" | "none"; dataUrl: string | null; text: string | null; truncated: boolean; encoding: string | null; textOffset: number; totalBytes: number };
+type FileDetail = { key: string; value: string };
+type FileDetails = { items: FileDetail[] };
+type SortKey = "name" | "modified" | "type" | "size";
+type SortDirection = "ascending" | "descending";
+type ViewMode = "comfortable" | "compact" | "grid";
+type ResizableColumn = "modified" | "type" | "size";
+type ColumnWidths = Record<ResizableColumn, number>;
+type UiLanguage = "zh-CN" | "en";
+type ClaudeProvider = "anthropic" | "deepseek";
+type ClaudeCredentialStatus = { stored: boolean; environmentAvailable: boolean };
+type ClaudeDiagnostic = { claudeFound: boolean; version: string | null; provider: string; endpoint: string; keyAvailable: boolean; status: "ready" | "claudeMissing" | "missingKey" | "networkError" | "authError" | "serviceError" | "notAuthenticated"; message: string; balanceAvailable: boolean | null };
+type ClipboardState = { mode: "copy" | "move"; paths: string[] };
+type ClipboardPayload = ClipboardState;
+type PathPair = { from: string; to: string };
+type UndoAction = { kind: "deleteCreated"; paths: string[] } | { kind: "move"; pairs: PathPair[] } | { kind: "restoreTrash"; ids: string[] };
+type UndoRecord = { id: string; action: UndoAction; label: string; createdAt: number };
+type OperationIssue = { path: string; code: "accessDenied" | "inUse" | "diskFull" | "pathTooLong" | "network" | "notFound" | "other"; message: string };
+type FileOperationResult = { completed: number; skipped: number; cancelled: boolean; error: string | null; issues: OperationIssue[]; undo: UndoAction | null };
+type OperationProgress = { jobId: string; processedBytes: number; totalBytes: number; completedItems: number; totalItems: number; currentName: string };
+type OperationPhase = "scanning" | "transfer";
+type OperationScanProgress = OperationProgress & { phase: OperationPhase; scannedItems: number; scannedBytes: number };
+type RunningOperation = OperationScanProgress & { mode: "copy" | "move"; paused: boolean; startedAt: number; speed: number };
+type TransferTaskStatus = "queued" | "running" | "paused" | "completed" | "cancelled" | "failed";
+type ConflictChoice = "replace" | "skip" | "keepBoth";
+type ConflictEntry = { source: FileEntry; target: FileEntry };
+type ConflictResolution = { source: string; action: ConflictChoice };
+type TransferTask = RunningOperation & { sourcePaths: string[]; destination: string; conflict: ConflictChoice; conflictResolutions: ConflictResolution[]; status: TransferTaskStatus; queuedAt: number; finishedAt: number | null; issues: OperationIssue[]; error: string | null };
+type PendingTransfer = { clipboard: ClipboardState; destination: string; conflicts: ConflictEntry[]; currentIndex: number; resolutions: ConflictResolution[] };
+type RetryTransfer = { clipboard: ClipboardState; destination: string; conflict: ConflictChoice; conflictResolutions: ConflictResolution[] };
+type DirectoryChanged = { path: string };
+type DirectoryLoadProgress = { jobId: string; path: string; entries: FileEntry[]; scanned: number; folderCount: number; fileCount: number };
+type PathSuggestion = { path: string; label: string; source: "recent" | "folder" };
+type FolderSizeProgress = { jobId: string; totalBytes: number; scannedFiles: number; scannedFolders: number };
+type FolderSizeResult = { path: string; totalBytes: number; scannedFiles: number; scannedFolders: number; issues: number; cancelled: boolean };
+type FolderSizeState = FolderSizeResult & { running: boolean };
+type SpaceScanProgress = { jobId: string; scannedBytes: number; scannedFiles: number; scannedFolders: number; issues: number; currentPath: string };
+type SpaceScanItem = { name: string; path: string; size: number; modifiedUnixSeconds: number | null; isDirectory: boolean };
+type SpaceScanCategory = { id: string; risk: "safe" | "review" | "protected"; size: number; fileCount: number };
+type SpaceScanResult = { root: string; totalSpace: number; availableSpace: number; scannedBytes: number; scannedFiles: number; scannedFolders: number; issues: number; skippedReparsePoints: number; cancelled: boolean; largestFiles: SpaceScanItem[]; largestDirectories: SpaceScanItem[]; categories: SpaceScanCategory[] };
+type SpaceScanSnapshot = { root: string; capturedAt: number; totalSpace: number; availableSpace: number; scannedBytes: number; categories: Record<string, number> };
+type SpaceCleanupPreview = { root: string; categoryId: string; risk: "safe" | "review"; totalBytes: number; totalFiles: number; candidates: SpaceScanItem[]; truncated: boolean; issues: number };
+type SpaceCategoryAdvice = { summary: string; action: string; caution: string; cleanable: boolean };
+type SpaceCleanupAge = "all" | "30" | "90" | "365";
+type DirectoryStatus = { path: string; available: boolean; kind: "network" | "drive" | "folder"; reason: "accessDenied" | "notFound" | "unreachable" | "timeout" | "unknown" | null };
+type DragGhost = { x: number; y: number; count: number; mode: "copy" | "move" | "blocked"; targetLabel: string | null };
+type SearchKind = "all" | "folders" | "images" | "documents" | "videos" | "audio" | "archives";
+type SearchDate = "any" | "day" | "week" | "month" | "year";
+type SearchSize = "any" | "small" | "medium" | "large";
+type SearchProfile = { query: string; kind: SearchKind; date: SearchDate; size: SearchSize };
+type SearchHistoryItem = SearchProfile & { usedAt: number };
+type SavedSearch = SearchProfile & { id: string; name: string };
+type SearchProgress = { jobId: string; scanned: number; matches: number; currentPath: string };
+type SearchProvider = "everything" | "native";
+type SearchResult = { entries: FileEntry[]; scanned: number; cancelled: boolean; truncated: boolean; provider: SearchProvider };
+type EverythingStatus = { installed: boolean; running: boolean; databaseLoaded: boolean; version: string | null; executable: string | null; indexedDrives: string[] };
+type DuplicateScanProgress = { jobId: string; phase: "scanning" | "fingerprint" | "verifying"; scannedFiles: number; candidateFiles: number; processedBytes: number; currentPath: string };
+type DuplicateGroup = { signature: string; fileSize: number; reclaimableBytes: number; files: SpaceScanItem[] };
+type DuplicateScanResult = { root: string; scannedFiles: number; candidateFiles: number; processedBytes: number; reclaimableBytes: number; issues: number; cancelled: boolean; truncated: boolean; groups: DuplicateGroup[] };
+type DuplicateSizeFilter = "all" | "10mb" | "100mb" | "1gb";
+type DuplicateTypeFilter = "all" | "images" | "videos" | "audio" | "documents" | "archives" | "other";
+type ExternalDragResult = { effect: "copy" | "move" | "link" | "none" };
+type SelectionBox = { startX: number; startY: number; currentX: number; currentY: number };
+type DeleteRequest = { permanent: boolean; paths: string[]; names: string[] };
+type BatchRenameDraft = { find: string; replace: string; prefix: string; suffix: string; addNumbers: boolean; startNumber: number };
+type ExternalOpenTarget = { directory: string; selectedPath: string | null };
+type FolderIntegrationStatus = { enabled: boolean; command: string };
+
+const DEFAULT_LIST_VIEWPORT_HEIGHT = 510;
+const MAX_CACHED_THUMBNAILS = 96;
+const MAX_CACHED_FILE_ICONS = 320;
+const TEXT_PREVIEW_CHUNK = 128 * 1024;
+const SHOW_EXTENSIONS_KEY = "flow.showExtensions";
+const SHOW_HIDDEN_KEY = "flow.showHidden";
+const SORT_KEY = "flow.sortKey";
+const SORT_DIRECTION_KEY = "flow.sortDirection";
+const VIEW_MODE_KEY = "flow.viewMode";
+const LANGUAGE_KEY = "flow.language";
+const PREVIEW_PANE_KEY = "flow.previewPane";
+const SESSION_KEY = "flow.session";
+const UNDO_STACK_KEY = "flow.undoStack";
+const OPERATION_TASKS_KEY = "flow.operationTasks";
+const FAVORITES_KEY = "flow.favorites";
+const FAVORITE_COLLAPSE_KEY = "flow.favoriteCollapsedGroups";
+const RECENT_PATHS_KEY = "flow.recentPaths";
+const SEARCH_HISTORY_KEY = "flow.searchHistory";
+const SAVED_SEARCHES_KEY = "flow.savedSearches";
+const SEARCH_EVERYTHING_KEY = "flow.searchEverything";
+const COLUMN_WIDTHS_KEY = "flow.columnWidths";
+const CLAUDE_PROVIDER_KEY = "flow.claudeProvider";
+const CLAUDE_FULL_ACCESS_KEY = "flow.claudeFullAccess";
+const SPACE_SCAN_SNAPSHOTS_KEY = "flow.spaceScanSnapshots.v1";
+const DEFAULT_COLUMN_WIDTHS: ColumnWidths = { modified: 178, type: 140, size: 84 };
+const MAX_UNDO_STEPS = 20;
+const UNDO_RETENTION_MS = 30 * 60 * 1000;
+
+const UI_COPY = {
+  "zh-CN": {
+    subtitle: "轻巧的文件管理器", newItem: "新建", newFolder: "文件夹", newTextFile: "文本文档", newMarkdownFile: "Markdown 文档", terminal: "终端", terminalHere: "在此处打开终端", plainTerminal: "普通终端", claudeCode: "Claude Code", claudeHere: "在此处打开 Claude Code", locations: "位置", selection: "所选项目", favorites: "收藏", folders: "文件夹树",
+    nothingSelected: "尚未选择", selectHint: "选择项目后可执行操作", folder: "文件夹", address: "输入文件夹路径", search: "筛选当前文件夹；回车搜索子文件夹", searchAll: "搜索子文件夹", searchFilters: "搜索筛选", searchResults: "搜索结果", backToFolder: "返回文件夹",
+    loading: "正在加载…", rename: "重命名", recycle: "移入回收站", sort: "排序", view: "查看", name: "名称", modified: "修改日期",
+    type: "类型", size: "大小", dateModified: "修改日期", comfortable: "舒适详细信息", compact: "紧凑详细信息", grid: "大图标", previewPane: "预览窗格", settings: "设置", pinTab: "固定标签页", unpinTab: "取消固定标签页", duplicateTab: "复制标签页", reopenClosedTab: "重新打开关闭的标签页", closeTab: "关闭标签页", closeOtherTabs: "关闭其他标签页", historyHint: "右键查看历史记录",
+    settingsTitle: "Flow Files 设置", settingsIntro: "界面与工具启动设置；不会修改文件名或文件内容。", interfaceLanguage: "界面语言",
+    windowsFolderIntegration: "Windows 文件夹打开方式", windowsFolderIntegrationHint: "让遵循 Windows 默认文件夹动作的程序优先交给 Flow Files 打开。不会替换桌面、任务栏、系统文件选择框；个别应用若直接强制启动资源管理器，仍可能绕过此设置。可随时恢复。", windowsFolderIntegrationEnabled: "已为当前用户启用，可随时恢复", windowsFolderIntegrationDisabled: "当前仍使用 Windows 资源管理器", windowsFolderIntegrationUpdating: "正在更新…", windowsFolderIntegrationFailed: "Windows 文件夹关联更新失败",
+    explorerContextMenu: "资源管理器右键菜单", explorerContextMenuHint: "在文件夹、磁盘和文件夹空白处增加“在 Flow Files 中打开”。Windows 11 的精简右键菜单中可能需要先点“显示更多选项”。", explorerContextMenuEnabled: "右键菜单已为当前用户添加", explorerContextMenuDisabled: "尚未添加右键菜单项", explorerContextMenuFailed: "右键菜单更新失败",
+    claudeProvider: "Claude Code 服务", officialAnthropic: "Anthropic", deepseek: "DeepSeek", deepseekApiKey: "DeepSeek API 密钥", deepseekKeyHint: "只需保存一次。密钥由 Windows 凭据管理器保护，启动 Claude Code 时自动注入。", keySaved: "密钥已安全保存", keyFromEnvironment: "正在使用系统 DEEPSEEK_API_KEY", keyMissing: "尚未保存密钥", saveKey: "保存密钥", replaceKey: "更换密钥", removeKey: "移除", enterApiKey: "粘贴 DeepSeek API Key", claudeFullAccess: "默认信任并完全授权", claudeFullAccessHint: "从 Flow 启动时跳过工作区信任和操作权限询问。Claude 可以直接读写文件并执行命令。",
+    chinese: "简体中文", english: "English", fileExtensions: "文件扩展名", extensionsHint: "在名称列中显示 .txt、.png 等后缀。", show: "显示",
+    close: "完成", ready: "就绪", shown: "个项目", empty: "此文件夹为空。", noMatches: "没有匹配的文件。",
+    actions: "操作", copy: "复制", cut: "剪切", paste: "粘贴", copyPath: "复制路径", copyName: "复制名称", refresh: "刷新", undo: "撤销", undoRetention: "最多保留 20 步，关闭并重新打开后仍可撤销；30 分钟后自动过期", delete: "移入回收站", permanentDelete: "永久删除", openWith: "打开方式", properties: "属性", revealInExplorer: "在资源管理器中定位", systemMenu: "Windows 系统菜单", compressZip: "压缩为 ZIP", extractZip: "解压到当前文件夹", batchRename: "批量重命名", batchRenameTitle: "批量重命名", batchRenameIntro: "先预览新名称，确认后一次性应用；文件扩展名不会被修改。", findText: "查找文字", replaceWith: "替换为", prefix: "名称前缀", suffix: "名称后缀", addNumbers: "添加序号", startAt: "起始序号", applyRename: "应用重命名", previewChanges: "更名预览", available: "可用",
+    cancel: "取消", pause: "暂停", resume: "继续", tasks: "文件任务", queued: "等待中", completed: "已完成", failed: "失败", clearCompleted: "清除已完成", noTasks: "暂无文件任务", copying: "正在复制", moving: "正在移动", scanning: "正在扫描文件", scannedItems: "已扫描项目", conflictTitle: "目标位置已有同名项目", conflictIntro: "比较源项目和目标项目，然后选择处理方式。", sourceItem: "传入的项目", targetItem: "目标位置已有项目", conflictProgress: "冲突", applyRemaining: "对剩余冲突应用此选择", replaceNoUndo: "替换会移除目标位置原有内容，此操作不提供撤销。", issueTitle: "部分项目未能处理", issueIntro: "其他项目已继续完成。下面列出了需要处理的问题。", retryFailed: "重试失败项目",
+    replace: "替换", skip: "跳过", keepBoth: "两者都保留", selectedCount: "个项目已选择", deleteTitle: "移入回收站？", permanentDeleteTitle: "永久删除？", deleteWarning: "这些项目会进入 Windows 回收站，之后仍可恢复。", permanentWarning: "永久删除后无法撤销。请确认要删除这些项目。", confirmDelete: "移入回收站", confirmPermanentDelete: "永久删除",
+    preview: "预览", noPreview: "没有可用预览", textTruncated: "仅显示文件开头 128 KB", officePreviewHint: "已显示文档基本信息；使用默认应用打开可查看完整内容。", codecUnavailable: "当前系统可能未安装此格式的图像解码器。", open: "打开", editAddress: "编辑地址", quickViewHint: "按空格快速预览", hiddenItems: "隐藏的项目", hiddenHint: "显示被 Windows 标记为隐藏的文件和文件夹。", addFavorite: "收藏当前文件夹", removeFavorite: "取消收藏", anyType: "所有类型", anyDate: "任意日期", anySize: "任意大小", foldersOnly: "文件夹", images: "图片", documents: "文档", videos: "视频", audio: "音频", archives: "压缩文件", pastDay: "过去 24 小时", pastWeek: "过去一周", pastMonth: "过去一个月", pastYear: "过去一年", smallFiles: "小于 1 MB", mediumFiles: "1–100 MB", largeFiles: "大于 100 MB", startSearch: "开始搜索", scanned: "已扫描", matches: "个结果", recentSearches: "最近搜索", savedSearches: "常用筛选", saveSearch: "保存当前筛选", clearHistory: "清除记录", removeSavedSearch: "删除常用筛选", noSearchHistory: "还没有搜索记录", claudeDiagnostics: "配置诊断", testConnection: "测试配置", testingConnection: "正在检测…", diagnosticReady: "配置可用", diagnosticMissing: "配置不完整", diagnosticVersion: "Claude 版本", diagnosticEndpoint: "API 地址", diagnosticCredential: "凭据", diagnosticBalance: "账户可调用", credentialAvailable: "已找到", credentialUnavailable: "未找到",
+    spaceHealth: "空间体检", spaceHealthTitle: "磁盘空间体检", spaceHealthIntro: "只读扫描磁盘占用，先看清空间去向；本页面不会删除或修改任何文件。", startScan: "开始体检", rescan: "重新扫描", stopScan: "停止扫描", scanningSpace: "正在检查空间…", scanCaptured: "已读取文件", inaccessible: "无法读取", largeDirectories: "大目录", largeFilesTitle: "大文件", attentionItems: "值得查看", openLocation: "打开所在位置", noScanYet: "选择磁盘并开始体检。扫描期间仍可关闭此窗口，任务会自动停止。", scanCoverageHint: "统计为可访问文件的逻辑大小；系统保护目录、云端占位文件和目录联接不会强行读取。", safeToReview: "可放心检查", confirmBeforeAction: "需要确认", protectedItem: "仅供参考",
+  },
+  en: {
+    subtitle: "lightweight file manager", newItem: "New", newFolder: "Folder", newTextFile: "Text document", newMarkdownFile: "Markdown document", terminal: "Terminal", terminalHere: "Open Terminal here", plainTerminal: "Terminal", claudeCode: "Claude Code", claudeHere: "Open Claude Code here", locations: "Locations", selection: "Selection", favorites: "Favorites", folders: "Folder tree",
+    nothingSelected: "Nothing selected", selectHint: "Select an item for actions", folder: "Folder", address: "Enter a folder path", search: "Filter this folder; Enter searches subfolders", searchAll: "Search subfolders", searchFilters: "Search filters", searchResults: "Search results", backToFolder: "Back to folder",
+    loading: "Loading…", rename: "Rename", recycle: "Recycle", sort: "Sort", view: "View", name: "Name", modified: "Modified",
+    type: "Type", size: "Size", dateModified: "Date modified", comfortable: "Comfortable details", compact: "Compact details", grid: "Large icons", previewPane: "Preview pane", settings: "Settings", pinTab: "Pin tab", unpinTab: "Unpin tab", duplicateTab: "Duplicate tab", reopenClosedTab: "Reopen closed tab", closeTab: "Close tab", closeOtherTabs: "Close other tabs", historyHint: "Right-click for history",
+    settingsTitle: "Flow Files settings", settingsIntro: "Interface and tool launch settings. Files and names are never changed.", interfaceLanguage: "Interface language",
+    windowsFolderIntegration: "Windows folder opening", windowsFolderIntegrationHint: "Send normal folder-open requests that follow the Windows default action to Flow Files. This does not replace the desktop, taskbar, or system file pickers; apps that explicitly launch File Explorer can still bypass it. You can restore it any time.", windowsFolderIntegrationEnabled: "Enabled for this user; can be restored any time", windowsFolderIntegrationDisabled: "Windows File Explorer remains the default", windowsFolderIntegrationUpdating: "Updating…", windowsFolderIntegrationFailed: "Could not update Windows folder integration",
+    explorerContextMenu: "Explorer context menu", explorerContextMenuHint: "Add “Open in Flow Files” to folders, drives, and empty folder space. On Windows 11, it may be under “Show more options”.", explorerContextMenuEnabled: "Context menu added for this user", explorerContextMenuDisabled: "Context menu item is not added", explorerContextMenuFailed: "Could not update the context menu",
+    claudeProvider: "Claude Code service", officialAnthropic: "Anthropic", deepseek: "DeepSeek", deepseekApiKey: "DeepSeek API key", deepseekKeyHint: "Save it once. Windows Credential Manager protects the key and Flow Files injects it only when Claude Code starts.", keySaved: "Key securely saved", keyFromEnvironment: "Using system DEEPSEEK_API_KEY", keyMissing: "No key saved", saveKey: "Save key", replaceKey: "Replace key", removeKey: "Remove", enterApiKey: "Paste DeepSeek API key", claudeFullAccess: "Trust workspaces with full access", claudeFullAccessHint: "Skip workspace trust and action permission prompts for Claude launched by Flow. Claude can edit files and run commands without confirmation.",
+    chinese: "简体中文", english: "English", fileExtensions: "File name extensions", extensionsHint: "Show suffixes such as .txt and .png in the name column.", show: "Show",
+    close: "Done", ready: "Ready", shown: "shown", empty: "This folder is empty.", noMatches: "No matching files.",
+    actions: "Actions", copy: "Copy", cut: "Cut", paste: "Paste", copyPath: "Copy path", copyName: "Copy name", refresh: "Refresh", undo: "Undo", undoRetention: "Keeps up to 20 steps across restarts; entries expire after 30 minutes", delete: "Move to Recycle Bin", permanentDelete: "Delete permanently", openWith: "Open with", properties: "Properties", revealInExplorer: "Show in File Explorer", systemMenu: "Windows system menu", compressZip: "Compress to ZIP", extractZip: "Extract to current folder", batchRename: "Batch rename", batchRenameTitle: "Batch rename", batchRenameIntro: "Preview names before applying them. File extensions are preserved.", findText: "Find text", replaceWith: "Replace with", prefix: "Name prefix", suffix: "Name suffix", addNumbers: "Add numbering", startAt: "Start number", applyRename: "Apply rename", previewChanges: "Rename preview", available: "free",
+    cancel: "Cancel", pause: "Pause", resume: "Resume", tasks: "File tasks", queued: "Queued", completed: "Completed", failed: "Failed", clearCompleted: "Clear completed", noTasks: "No file tasks", copying: "Copying", moving: "Moving", scanning: "Scanning files", scannedItems: "items scanned", conflictTitle: "Items with the same name already exist", conflictIntro: "Compare the incoming and existing items, then choose how to continue.", sourceItem: "Incoming item", targetItem: "Existing item", conflictProgress: "Conflict", applyRemaining: "Apply this choice to remaining conflicts", replaceNoUndo: "Replace removes the existing destination content and cannot be undone.", issueTitle: "Some items could not be processed", issueIntro: "The remaining items continued. Review the issues below.", retryFailed: "Retry failed items",
+    replace: "Replace", skip: "Skip", keepBoth: "Keep both", selectedCount: "items selected", deleteTitle: "Move to Recycle Bin?", permanentDeleteTitle: "Delete permanently?", deleteWarning: "These items will be moved to the Windows Recycle Bin and can be restored later.", permanentWarning: "Permanent deletion cannot be undone. Confirm that you want to delete these items.", confirmDelete: "Move to Recycle Bin", confirmPermanentDelete: "Delete permanently",
+    preview: "Preview", noPreview: "No preview available", textTruncated: "Showing the first 128 KB", officePreviewHint: "Basic document details are shown. Open it in the default app for the full contents.", codecUnavailable: "This image format may require a system codec.", open: "Open", editAddress: "Edit address", quickViewHint: "Press Space for Quick Look", hiddenItems: "Hidden items", hiddenHint: "Show files and folders marked as hidden by Windows.", addFavorite: "Add current folder to Favorites", removeFavorite: "Remove from Favorites", anyType: "All types", anyDate: "Any date", anySize: "Any size", foldersOnly: "Folders", images: "Images", documents: "Documents", videos: "Videos", audio: "Audio", archives: "Archives", pastDay: "Past 24 hours", pastWeek: "Past week", pastMonth: "Past month", pastYear: "Past year", smallFiles: "Under 1 MB", mediumFiles: "1–100 MB", largeFiles: "Over 100 MB", startSearch: "Search", scanned: "Scanned", matches: "matches", recentSearches: "Recent searches", savedSearches: "Saved filters", saveSearch: "Save current filters", clearHistory: "Clear history", removeSavedSearch: "Remove saved filter", noSearchHistory: "No search history yet", claudeDiagnostics: "Configuration diagnostics", testConnection: "Test configuration", testingConnection: "Testing…", diagnosticReady: "Configuration ready", diagnosticMissing: "Configuration incomplete", diagnosticVersion: "Claude version", diagnosticEndpoint: "API endpoint", diagnosticCredential: "Credential", diagnosticBalance: "Account available", credentialAvailable: "Available", credentialUnavailable: "Not found",
+    spaceHealth: "Space check", spaceHealthTitle: "Disk space check", spaceHealthIntro: "Read-only scan that explains disk usage. No file is changed or deleted from this page.", startScan: "Start scan", rescan: "Scan again", stopScan: "Stop scan", scanningSpace: "Scanning disk space…", scanCaptured: "Files measured", inaccessible: "Unreadable", largeDirectories: "Large folders", largeFilesTitle: "Large files", attentionItems: "Worth reviewing", openLocation: "Open location", noScanYet: "Choose a drive and start a scan. Closing this window stops the scan.", scanCoverageHint: "Sizes are logical bytes from readable files. Protected paths, cloud placeholders, and directory junctions are not forced open.", safeToReview: "Safe to review", confirmBeforeAction: "Confirm first", protectedItem: "Information only",
+  },
+} as const;
+
+function readStoredFavorites() {
+  try {
+    const value = JSON.parse(localStorage.getItem(FAVORITES_KEY) ?? "[]");
+    if (!Array.isArray(value)) return [];
+    const items = value.flatMap((item): FavoriteItem[] => {
+      if (typeof item === "string" && item.length > 0) return [{ path: item, label: null, group: null }];
+      if (item && typeof item === "object" && "path" in item && typeof item.path === "string" && item.path.length > 0) {
+        return [{ path: item.path, label: "label" in item && typeof item.label === "string" && item.label.trim() ? item.label.trim() : null, group: "group" in item && typeof item.group === "string" && item.group.trim() ? item.group.trim() : null }];
+      }
+      return [];
+    });
+    return items.filter((item, index) => items.findIndex((candidate) => candidate.path.toLocaleLowerCase() === item.path.toLocaleLowerCase()) === index);
+  } catch {
+    return [];
+  }
+}
+
+function readCollapsedFavoriteGroups() {
+  try {
+    const value = JSON.parse(localStorage.getItem(FAVORITE_COLLAPSE_KEY) ?? "[]");
+    return new Set(Array.isArray(value) ? value.filter((group): group is string => typeof group === "string") : []);
+  } catch {
+    return new Set<string>();
+  }
+}
+
+function readSpaceScanSnapshots(): Record<string, SpaceScanSnapshot> {
+  try {
+    const value = JSON.parse(localStorage.getItem(SPACE_SCAN_SNAPSHOTS_KEY) ?? "{}");
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+    return value as Record<string, SpaceScanSnapshot>;
+  } catch {
+    return {};
+  }
+}
+
+function snapshotForSpaceScan(result: SpaceScanResult): SpaceScanSnapshot {
+  return {
+    root: result.root,
+    capturedAt: Date.now(),
+    totalSpace: result.totalSpace,
+    availableSpace: result.availableSpace,
+    scannedBytes: result.scannedBytes,
+    categories: Object.fromEntries(result.categories.map((category) => [category.id, category.size])),
+  };
+}
+
+function readStoredRecentPaths() {
+  try {
+    const value = JSON.parse(localStorage.getItem(RECENT_PATHS_KEY) ?? "[]");
+    return Array.isArray(value) ? [...new Set(value.filter((path): path is string => typeof path === "string" && path.length > 0))].slice(0, 20) : [];
+  } catch {
+    return [];
+  }
+}
+
+function readSearchProfile(value: unknown): SearchProfile | null {
+  if (!value || typeof value !== "object") return null;
+  const candidate = value as Partial<SearchProfile>;
+  const kinds: SearchKind[] = ["all", "folders", "images", "documents", "videos", "audio", "archives"];
+  const dates: SearchDate[] = ["any", "day", "week", "month", "year"];
+  const sizes: SearchSize[] = ["any", "small", "medium", "large"];
+  if (typeof candidate.query !== "string" || !kinds.includes(candidate.kind as SearchKind) || !dates.includes(candidate.date as SearchDate) || !sizes.includes(candidate.size as SearchSize)) return null;
+  return { query: candidate.query.slice(0, 240), kind: candidate.kind as SearchKind, date: candidate.date as SearchDate, size: candidate.size as SearchSize };
+}
+
+function readStoredSearchHistory(): SearchHistoryItem[] {
+  try {
+    const value = JSON.parse(localStorage.getItem(SEARCH_HISTORY_KEY) ?? "[]");
+    if (!Array.isArray(value)) return [];
+    return value.flatMap((item): SearchHistoryItem[] => {
+      const profile = readSearchProfile(item);
+      const usedAt = item && typeof item === "object" && "usedAt" in item && typeof item.usedAt === "number" ? item.usedAt : 0;
+      return profile ? [{ ...profile, usedAt }] : [];
+    }).slice(0, 12);
+  } catch {
+    return [];
+  }
+}
+
+function readStoredSavedSearches(): SavedSearch[] {
+  try {
+    const value = JSON.parse(localStorage.getItem(SAVED_SEARCHES_KEY) ?? "[]");
+    if (!Array.isArray(value)) return [];
+    return value.flatMap((item): SavedSearch[] => {
+      const profile = readSearchProfile(item);
+      if (!profile || !item || typeof item !== "object") return [];
+      const candidate = item as Partial<SavedSearch>;
+      return typeof candidate.id === "string" && typeof candidate.name === "string" ? [{ ...profile, id: candidate.id, name: candidate.name.slice(0, 120) }] : [];
+    }).slice(0, 20);
+  } catch {
+    return [];
+  }
+}
+
+function readStoredUndoStack(): UndoRecord[] {
+  try {
+    const value = JSON.parse(localStorage.getItem(UNDO_STACK_KEY) ?? "[]");
+    if (!Array.isArray(value)) return [];
+    const now = Date.now();
+    return value.flatMap((item): UndoRecord[] => {
+      if (!item || typeof item !== "object") return [];
+      const candidate = item as Partial<UndoRecord>;
+      if (typeof candidate.id !== "string" || typeof candidate.label !== "string" || typeof candidate.createdAt !== "number" || now - candidate.createdAt > UNDO_RETENTION_MS || !candidate.action || typeof candidate.action !== "object") return [];
+      const action = candidate.action as UndoAction;
+      if (action.kind === "deleteCreated" && Array.isArray(action.paths) && action.paths.every((path) => typeof path === "string")) return [{ id: candidate.id, label: candidate.label.slice(0, 160), createdAt: candidate.createdAt, action: { kind: action.kind, paths: action.paths } }];
+      if (action.kind === "restoreTrash" && Array.isArray(action.ids) && action.ids.every((id) => typeof id === "string")) return [{ id: candidate.id, label: candidate.label.slice(0, 160), createdAt: candidate.createdAt, action: { kind: action.kind, ids: action.ids } }];
+      if (action.kind === "move" && Array.isArray(action.pairs) && action.pairs.every((pair) => pair && typeof pair.from === "string" && typeof pair.to === "string")) return [{ id: candidate.id, label: candidate.label.slice(0, 160), createdAt: candidate.createdAt, action: { kind: action.kind, pairs: action.pairs } }];
+      return [];
+    }).slice(-MAX_UNDO_STEPS);
+  } catch {
+    return [];
+  }
+}
+
+function readStoredOperationTasks(): TransferTask[] {
+  try {
+    const value = JSON.parse(localStorage.getItem(OPERATION_TASKS_KEY) ?? "[]");
+    if (!Array.isArray(value)) return [];
+    const statuses: TransferTaskStatus[] = ["queued", "running", "paused", "completed", "cancelled", "failed"];
+    return value.flatMap((item): TransferTask[] => {
+      if (!item || typeof item !== "object") return [];
+      const candidate = item as Partial<TransferTask>;
+      if (typeof candidate.jobId !== "string" || (candidate.mode !== "copy" && candidate.mode !== "move") || !Array.isArray(candidate.sourcePaths) || !candidate.sourcePaths.every((path) => typeof path === "string") || typeof candidate.destination !== "string" || !statuses.includes(candidate.status as TransferTaskStatus)) return [];
+      const interrupted = candidate.status === "queued" || candidate.status === "running" || candidate.status === "paused";
+      return [{
+        jobId: candidate.jobId, mode: candidate.mode, sourcePaths: candidate.sourcePaths, destination: candidate.destination,
+        conflict: candidate.conflict === "replace" || candidate.conflict === "keepBoth" ? candidate.conflict : "skip",
+        conflictResolutions: Array.isArray(candidate.conflictResolutions) ? candidate.conflictResolutions.filter((resolution): resolution is ConflictResolution => !!resolution && typeof resolution.source === "string" && ["replace", "skip", "keepBoth"].includes(resolution.action)) : [],
+        status: interrupted ? "failed" : candidate.status as TransferTaskStatus,
+        queuedAt: typeof candidate.queuedAt === "number" ? candidate.queuedAt : Date.now(), startedAt: typeof candidate.startedAt === "number" ? candidate.startedAt : Date.now(), finishedAt: interrupted ? Date.now() : typeof candidate.finishedAt === "number" ? candidate.finishedAt : null,
+        paused: false, processedBytes: typeof candidate.processedBytes === "number" ? candidate.processedBytes : 0, totalBytes: typeof candidate.totalBytes === "number" ? candidate.totalBytes : 0,
+        completedItems: typeof candidate.completedItems === "number" ? candidate.completedItems : 0, totalItems: typeof candidate.totalItems === "number" ? candidate.totalItems : candidate.sourcePaths.length,
+        currentName: typeof candidate.currentName === "string" ? candidate.currentName : "", phase: candidate.phase === "transfer" ? "transfer" : "scanning",
+        scannedItems: typeof candidate.scannedItems === "number" ? candidate.scannedItems : 0, scannedBytes: typeof candidate.scannedBytes === "number" ? candidate.scannedBytes : 0, speed: 0,
+        issues: Array.isArray(candidate.issues) ? candidate.issues : [], error: interrupted ? "Flow Files closed before this task completed." : typeof candidate.error === "string" ? candidate.error.slice(0, 1000) : null,
+      }];
+    }).slice(-20);
+  } catch {
+    return [];
+  }
+}
+
+function readStoredSession(): { tabs: FolderTab[]; activeTabId: number } | null {
+  try {
+    const value = JSON.parse(localStorage.getItem(SESSION_KEY) ?? "null") as { tabs?: unknown[]; activeTabId?: unknown } | null;
+    if (!value || !Array.isArray(value.tabs) || value.tabs.length === 0) return null;
+    const rawTabs = value.tabs.filter((tab): tab is FolderTab => {
+      const candidate = tab as Partial<FolderTab>;
+      return typeof candidate.id === "number" && typeof candidate.path === "string" && Array.isArray(candidate.history);
+    }).slice(0, 12);
+    if (!rawTabs.length) return null;
+    const activeIndex = Math.max(0, rawTabs.findIndex((tab) => tab.id === value.activeTabId));
+    const seed = Date.now();
+    const tabs = rawTabs.map((tab, index) => {
+      const history = tab.history.filter((path): path is string => typeof path === "string" && path.length > 0).slice(-30);
+      const safeHistory = history.length ? history : [tab.path];
+      const storedViewMode: ViewMode = tab.viewMode === "compact" || tab.viewMode === "grid" ? tab.viewMode : "comfortable";
+      const storedSelection = Array.isArray(tab.selectedPaths) ? tab.selectedPaths.filter((path): path is string => typeof path === "string").slice(0, 500) : [];
+      return { ...tab, id: seed + index, label: typeof tab.label === "string" ? tab.label : labelForPath(tab.path), pinned: !!tab.pinned, history: safeHistory, historyIndex: Math.max(0, Math.min(Number(tab.historyIndex) || 0, safeHistory.length - 1)), scrollTop: Math.max(0, Number(tab.scrollTop) || 0), viewMode: storedViewMode, selectedPaths: storedSelection };
+    });
+    return { tabs, activeTabId: tabs[activeIndex]?.id ?? tabs[0].id };
+  } catch {
+    return null;
+  }
+}
+
+function labelForPath(path: string) {
+  const normalized = path.replace(/[\\/]+$/, "");
+  return normalized.split(/[\\/]/).pop() || path;
+}
+
+function volumeKey(path: string) {
+  const drive = path.match(/^([A-Za-z]:)[\\/]/);
+  if (drive) return drive[1].toLowerCase();
+  const network = path.match(/^\\\\([^\\]+)\\([^\\]+)/);
+  return network ? `\\\\${network[1].toLowerCase()}\\${network[2].toLowerCase()}` : "";
+}
+
+function directoryKindForPath(path: string): DirectoryStatus["kind"] {
+  return path.startsWith("\\\\") ? "network" : /^[A-Za-z]:/.test(path) ? "drive" : "folder";
+}
+
+function nativeDropMode(paths: string[], destination: string): "copy" | "move" {
+  const destinationVolume = volumeKey(destination);
+  return destinationVolume && paths.every((path) => volumeKey(path) === destinationVolume) ? "move" : "copy";
+}
+
+function formatSize(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let value = bytes / 1024;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit += 1; }
+  return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[unit]}`;
+}
+
+function suggestedDuplicateKeep(group: DuplicateGroup) {
+  if (!group.files.length) return null;
+  const transientPath = /[\\/](temp|tmp|cache|caches|\.cache|\$recycle\.bin|node_modules)[\\/]/i;
+  return [...group.files].sort((left, right) => {
+    const leftTransient = transientPath.test(left.path) ? 1 : 0;
+    const rightTransient = transientPath.test(right.path) ? 1 : 0;
+    if (leftTransient !== rightTransient) return leftTransient - rightTransient;
+    const modified = (right.modifiedUnixSeconds ?? 0) - (left.modifiedUnixSeconds ?? 0);
+    if (modified !== 0) return modified;
+    return left.path.length - right.path.length || left.path.localeCompare(right.path);
+  })[0];
+}
+
+function duplicateKeepReason(group: DuplicateGroup, suggested: SpaceScanItem, language: UiLanguage) {
+  const transientPath = /[\\/](temp|tmp|cache|caches|\.cache|\$recycle\.bin|node_modules)[\\/]/i;
+  const alternatives = group.files.filter((item) => item.path !== suggested.path);
+  if (!transientPath.test(suggested.path) && alternatives.some((item) => transientPath.test(item.path))) {
+    return language === "zh-CN" ? "不在临时或缓存目录" : "outside temporary and cache folders";
+  }
+  const newest = Math.max(...group.files.map((item) => item.modifiedUnixSeconds ?? 0));
+  if ((suggested.modifiedUnixSeconds ?? 0) === newest && alternatives.some((item) => (item.modifiedUnixSeconds ?? 0) !== newest)) {
+    return language === "zh-CN" ? "修改时间较新" : "newer modified date";
+  }
+  return language === "zh-CN" ? "路径较短，通常更容易识别" : "shorter, easier-to-recognize path";
+}
+
+function duplicateFileMatchesType(item: SpaceScanItem, type: DuplicateTypeFilter) {
+  if (type === "all") return true;
+  const extension = item.name.includes(".") ? item.name.split(".").pop()!.toLowerCase() : "";
+  const groups: Record<Exclude<DuplicateTypeFilter, "all" | "other">, Set<string>> = {
+    images: new Set(["jpg", "jpeg", "png", "gif", "webp", "bmp", "svg", "heic", "avif", "tif", "tiff"]),
+    videos: new Set(["mp4", "mkv", "mov", "avi", "webm", "wmv", "m4v", "flv"]),
+    audio: new Set(["mp3", "wav", "flac", "aac", "m4a", "ogg", "wma", "opus"]),
+    documents: new Set(["txt", "md", "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "csv", "rtf"]),
+    archives: new Set(["zip", "7z", "rar", "tar", "gz", "bz2", "xz"]),
+  };
+  const known = Object.values(groups).some((extensions) => extensions.has(extension));
+  return type === "other" ? !known : groups[type].has(extension);
+}
+
+function unavailableLocationCopy(status: DirectoryStatus, language: UiLanguage) {
+  if (language === "zh-CN") {
+    if (status.reason === "accessDenied") return { title: "位置存在，但当前账号无权访问", detail: "请检查共享凭据或文件夹权限；Flow Files 每 8 秒自动重试。" };
+    if (status.reason === "notFound") return { title: "位置已移动或设备已断开", detail: "重新连接磁盘或确认路径后，Flow Files 会自动恢复。" };
+    if (status.reason === "unreachable") return { title: status.kind === "network" ? "网络位置暂时不可达" : "驱动器暂时不可达", detail: "请检查设备、网络或 VPN；Flow Files 每 8 秒自动重试。" };
+    if (status.reason === "timeout") return { title: "位置响应超时", detail: "检测已转入后台并延长重试间隔，不会持续阻塞文件浏览。" };
+    return { title: status.kind === "network" ? "网络位置不可用" : "驱动器或文件夹已断开", detail: "当前内容会保留；Flow Files 每 8 秒自动重试。" };
+  }
+  if (status.reason === "accessDenied") return { title: "The location exists, but access was denied", detail: "Check the share credentials or folder permissions. Flow Files retries every 8 seconds." };
+  if (status.reason === "notFound") return { title: "The location moved or the device disconnected", detail: "Reconnect the drive or verify the path; Flow Files will recover automatically." };
+  if (status.reason === "unreachable") return { title: status.kind === "network" ? "Network location is unreachable" : "Drive is unreachable", detail: "Check the device, network, or VPN. Flow Files retries every 8 seconds." };
+  if (status.reason === "timeout") return { title: "Location check timed out", detail: "The check continues in the background with a longer retry interval, without blocking file browsing." };
+  return { title: status.kind === "network" ? "Network location unavailable" : "Drive or folder disconnected", detail: "The current view is preserved. Flow Files retries every 8 seconds." };
+}
+
+function formatDuration(seconds: number) {
+  if (!Number.isFinite(seconds) || seconds < 0) return "—";
+  const rounded = Math.max(0, Math.round(seconds));
+  if (rounded < 60) return `${rounded}s`;
+  const minutes = Math.floor(rounded / 60);
+  const remainder = rounded % 60;
+  return minutes < 60 ? `${minutes}m ${remainder}s` : `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+}
+
+function formatDate(seconds: number | null, language: UiLanguage) {
+  if (!seconds) return "—";
+  return new Intl.DateTimeFormat(language, { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(seconds * 1000));
+}
+
+function operationIssueLabel(code: OperationIssue["code"], language: UiLanguage) {
+  const labels = language === "zh-CN"
+    ? { accessDenied: "没有访问权限", inUse: "文件正在被其他程序使用", diskFull: "磁盘空间不足", pathTooLong: "路径过长", network: "网络位置不可用", notFound: "文件已不存在", other: "文件系统错误" }
+    : { accessDenied: "Access denied", inUse: "File is in use", diskFull: "Not enough disk space", pathTooLong: "Path is too long", network: "Network location unavailable", notFound: "Item no longer exists", other: "File system error" };
+  return labels[code];
+}
+
+function spaceCategoryLabel(id: string, language: UiLanguage) {
+  const labels: Record<string, [string, string]> = {
+    temporaryFiles: ["临时文件", "Temporary files"],
+    browserCache: ["浏览器缓存", "Browser caches"],
+    recycleBin: ["回收站", "Recycle Bin"],
+    aiModels: ["本地 AI 模型", "Local AI models"],
+    developerCaches: ["开发工具缓存", "Developer caches"],
+    downloads: ["下载目录", "Downloads"],
+    installersArchives: ["安装包与压缩文件", "Installers and archives"],
+    windowsUpdateCache: ["Windows 更新缓存", "Windows Update cache"],
+    systemManaged: ["系统管理文件", "System-managed files"],
+  };
+  return labels[id]?.[language === "zh-CN" ? 0 : 1] ?? id;
+}
+
+function spaceCategoryAdvice(id: string, language: UiLanguage): SpaceCategoryAdvice {
+  const zh: Record<string, SpaceCategoryAdvice> = {
+    temporaryFiles: { summary: "建议优先复核；通常是应用和系统留下的临时内容。", action: "关闭正在使用的软件后，勾选确认不再需要的文件并移入回收站。", caution: "正在使用的文件会被跳过；清理后个别应用首次启动可能稍慢。", cleanable: true },
+    browserCache: { summary: "可释放空间，网页资源之后会自动重新下载。", action: "先关闭 Chrome、Edge 或 Firefox，再复核缓存文件并移入回收站。", caution: "这里只识别缓存目录，不会把密码、历史记录和书签列入清理。", cleanable: true },
+    recycleBin: { summary: "其中内容已经删除，但仍占用磁盘空间。", action: "确认没有需要恢复的文件后，使用 Windows 的“清空回收站”。", caution: "清空回收站是永久操作，Flow Files 不在这里替你自动执行。", cleanable: false },
+    aiModels: { summary: "模型通常很大，但删除后相关工具需要重新下载。", action: "按名称与路径确认不再使用的模型；更推荐先移动到其他磁盘。", caution: "这不是垃圾文件，必须逐项选择，不会默认勾选。", cleanable: true },
+    developerCaches: { summary: "大多可以重建，但下次构建或安装依赖时会再次下载。", action: "优先处理长期不用的 Cargo、npm、pnpm、pip 或 NuGet 缓存。", caution: "近期项目仍可能依赖离线缓存；必须逐项复核。", cleanable: true },
+    downloads: { summary: "下载目录是个人文件，不应自动当作垃圾。", action: "按大小和日期复核；优先移动到其他磁盘，仅删除确定无用的文件。", caution: "所有项目默认不选中。", cleanable: true },
+    installersArchives: { summary: "已完成安装的安装包和重复压缩包可能可以处理。", action: "确认软件已安装、压缩内容已保存后，再逐项移入回收站。", caution: "备份包、镜像和唯一压缩副本可能仍有价值。", cleanable: true },
+    windowsUpdateCache: { summary: "由 Windows 更新服务管理，不建议直接删除文件。", action: "请使用 Windows 设置中的“系统 → 存储 → 临时文件”处理。", caution: "直接改动可能造成更新修复或安装异常。", cleanable: false },
+    systemManaged: { summary: "页面文件、休眠文件和转储文件由 Windows 管理。", action: "通过 Windows 存储设置、休眠设置或系统高级设置调整。", caution: "不要在文件管理器中直接删除。", cleanable: false },
+  };
+  const en: Record<string, SpaceCategoryAdvice> = {
+    temporaryFiles: { summary: "Recommended for review; these are usually temporary app and system files.", action: "Close active apps, review each file, then move confirmed items to the Recycle Bin.", caution: "In-use files are skipped; some apps may start more slowly once.", cleanable: true },
+    browserCache: { summary: "Can free space; web resources will be downloaded again when needed.", action: "Close browsers first, then review cache files and move confirmed items to the Recycle Bin.", caution: "Passwords, history, and bookmarks are not included.", cleanable: true },
+    recycleBin: { summary: "Deleted items still occupy disk space.", action: "Use Windows Empty Recycle Bin after confirming nothing needs restoring.", caution: "Emptying it is permanent, so Flow Files does not run it automatically here.", cleanable: false },
+    aiModels: { summary: "Models are often large, but tools must download them again after deletion.", action: "Confirm unused models by name and path; moving them to another drive is preferred.", caution: "These are not junk files and are never preselected.", cleanable: true },
+    developerCaches: { summary: "Usually rebuildable, but builds and package installs may download them again.", action: "Prioritize old Cargo, npm, pnpm, pip, or NuGet cache files.", caution: "Recent projects may need offline caches; review every item.", cleanable: true },
+    downloads: { summary: "Downloads are personal files and must not be treated as automatic junk.", action: "Review by size and date; prefer moving to another drive.", caution: "No item is preselected.", cleanable: true },
+    installersArchives: { summary: "Completed installers and duplicate archives may be removable.", action: "Confirm installation or extraction first, then recycle individual items.", caution: "Backups, images, and unique archives may still be valuable.", cleanable: true },
+    windowsUpdateCache: { summary: "Managed by Windows Update and not suitable for direct deletion.", action: "Use Windows Settings → System → Storage → Temporary files.", caution: "Direct changes can interfere with update repair or installation.", cleanable: false },
+    systemManaged: { summary: "Page, hibernation, and dump files are managed by Windows.", action: "Use Windows Storage, hibernation, or advanced system settings.", caution: "Do not delete them in a file manager.", cleanable: false },
+  };
+  return (language === "zh-CN" ? zh : en)[id] ?? { summary: language === "zh-CN" ? "请先查看文件来源和用途。" : "Review the source and purpose first.", action: language === "zh-CN" ? "仅处理你确认不再需要的内容。" : "Only handle items you no longer need.", caution: language === "zh-CN" ? "不会自动选择或删除。" : "Nothing is selected or deleted automatically.", cleanable: false };
+}
+
+function displayName(entry: FileEntry, showExtensions: boolean) {
+  if (entry.isDirectory || showExtensions) return entry.name;
+  const extensionStart = entry.name.lastIndexOf(".");
+  return extensionStart > 0 ? entry.name.slice(0, extensionStart) : entry.name;
+}
+
+function joinWindowsPath(parent: string, name: string) {
+  return `${parent.replace(/[\\/]+$/, "")}\\${name}`;
+}
+
+function batchNameFor(entry: FileEntry, draft: BatchRenameDraft, index: number, total: number) {
+  const dot = entry.isDirectory ? -1 : entry.name.lastIndexOf(".");
+  const stem = dot > 0 ? entry.name.slice(0, dot) : entry.name;
+  const extension = dot > 0 ? entry.name.slice(dot) : "";
+  const replaced = draft.find ? stem.split(draft.find).join(draft.replace) : stem;
+  const digits = Math.max(2, String(Math.max(draft.startNumber, draft.startNumber + total - 1)).length);
+  const number = draft.addNumbers ? `${String(draft.startNumber + index).padStart(digits, "0")} ` : "";
+  return `${draft.prefix}${number}${replaced}${draft.suffix}${extension}`;
+}
+
+type EntryIconKind = "folder" | "image" | "video" | "audio" | "archive" | "code" | "pdf" | "app" | "document" | "file";
+
+function iconKindFor(entry: FileEntry): EntryIconKind {
+  if (entry.isDirectory) return "folder";
+  const extension = entry.extension?.toLowerCase() ?? "";
+  if (["png", "jpg", "jpeg", "webp", "gif", "heic", "bmp", "svg"].includes(extension)) return "image";
+  if (["mp4", "mkv", "mov", "avi", "webm"].includes(extension)) return "video";
+  if (["mp3", "wav", "flac", "aac", "m4a", "ogg"].includes(extension)) return "audio";
+  if (["zip", "rar", "7z", "tar", "gz"].includes(extension)) return "archive";
+  if (["js", "jsx", "ts", "tsx", "rs", "cs", "py", "java", "cpp", "c", "h", "html", "css", "json", "xml", "yaml", "yml", "toml", "md"].includes(extension)) return "code";
+  if (extension === "pdf") return "pdf";
+  if (["exe", "msi", "bat", "cmd", "ps1"].includes(extension)) return "app";
+  if (["txt", "doc", "docx", "rtf", "odt", "xls", "xlsx", "ppt", "pptx", "csv"].includes(extension)) return "document";
+  return "file";
+}
+
+function typeLabelFor(entry: FileEntry, language: UiLanguage) {
+  if (entry.isDirectory) return language === "zh-CN" ? "文件夹" : "Folder";
+  const extension = entry.extension?.toLowerCase() ?? "";
+  const exactLabels: Record<string, string> = language === "zh-CN" ? {
+    pdf: "PDF 文档", txt: "文本文档", md: "Markdown 文档", doc: "Word 文档", docx: "Word 文档", xls: "Excel 工作簿", xlsx: "Excel 工作簿",
+    ppt: "PowerPoint 演示文稿", pptx: "PowerPoint 演示文稿", csv: "CSV 文档", exe: "应用程序", msi: "安装程序", bat: "批处理脚本",
+    cmd: "命令脚本", ps1: "PowerShell 脚本", zip: "ZIP 压缩文件", rar: "RAR 压缩文件", "7z": "7-Zip 压缩文件", tar: "TAR 压缩文件", gz: "GZip 压缩文件",
+  } : {
+    pdf: "PDF document", txt: "Text document", md: "Markdown document", doc: "Word document", docx: "Word document", xls: "Excel workbook", xlsx: "Excel workbook",
+    ppt: "PowerPoint", pptx: "PowerPoint", csv: "CSV document", exe: "Application", msi: "Installer", bat: "Batch script", cmd: "Command script",
+    ps1: "PowerShell script", zip: "ZIP archive", rar: "RAR archive", "7z": "7-Zip archive", tar: "TAR archive", gz: "GZip archive",
+  };
+  if (exactLabels[extension]) return exactLabels[extension];
+  const kind = iconKindFor(entry);
+  const categoryLabels: Partial<Record<EntryIconKind, string>> = language === "zh-CN"
+    ? { image: "图像", video: "视频", audio: "音频", code: "源代码文件", document: "文档" }
+    : { image: "Image", video: "Video", audio: "Audio", code: "Source file", document: "Document" };
+  if (categoryLabels[kind]) return extension ? `${extension.toUpperCase()} ${categoryLabels[kind]}` : categoryLabels[kind]!;
+  return extension ? `${extension.toUpperCase()} ${language === "zh-CN" ? "文件" : "file"}` : language === "zh-CN" ? "文件" : "File";
+}
+
+function sortEntriesForView(entries: FileEntry[], sortKey: SortKey, sortDirection: SortDirection, language: UiLanguage) {
+  return [...entries].sort((left, right) => {
+    if (left.isDirectory !== right.isDirectory) return left.isDirectory ? -1 : 1;
+    let comparison = 0;
+    if (sortKey === "modified") comparison = (left.modifiedUnixSeconds ?? 0) - (right.modifiedUnixSeconds ?? 0);
+    else if (sortKey === "type") comparison = typeLabelFor(left, language).localeCompare(typeLabelFor(right, language), language, { numeric: true, sensitivity: "base" });
+    else if (sortKey === "size") comparison = left.size - right.size;
+    else comparison = left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: "base" });
+    return sortDirection === "ascending" ? comparison : -comparison;
+  });
+}
+
+function readStoredSortKey(): SortKey {
+  const stored = localStorage.getItem(SORT_KEY);
+  return stored === "modified" || stored === "type" || stored === "size" ? stored : "name";
+}
+
+function readStoredViewMode(): ViewMode {
+  const stored = localStorage.getItem(VIEW_MODE_KEY);
+  return stored === "compact" || stored === "grid" ? stored : "comfortable";
+}
+
+function readStoredColumnWidths(): ColumnWidths {
+  try {
+    const stored = JSON.parse(localStorage.getItem(COLUMN_WIDTHS_KEY) ?? "null") as Partial<ColumnWidths> | null;
+    return {
+      modified: Math.max(110, Math.min(320, Number(stored?.modified) || DEFAULT_COLUMN_WIDTHS.modified)),
+      type: Math.max(90, Math.min(260, Number(stored?.type) || DEFAULT_COLUMN_WIDTHS.type)),
+      size: Math.max(70, Math.min(180, Number(stored?.size) || DEFAULT_COLUMN_WIDTHS.size)),
+    };
+  } catch {
+    return DEFAULT_COLUMN_WIDTHS;
+  }
+}
+
+function pathCrumbs(path: string) {
+  const normalized = path.replace(/[\\/]+$/, "");
+  const parts = normalized.split(/[\\/]+/).filter(Boolean);
+  if (parts.length === 0) return [];
+  if (normalized.startsWith("\\\\") && parts.length >= 2) {
+    const root = `\\\\${parts[0]}\\${parts[1]}`;
+    return [{ label: root, path: root }, ...parts.slice(2).map((label, index) => ({ label, path: `${root}\\${parts.slice(2, index + 3).join("\\")}` }))];
+  }
+  return parts.map((label, index) => ({
+    label: index === 0 && /^[A-Za-z]:$/.test(label) ? `${label}\\` : label,
+    path: index === 0 && /^[A-Za-z]:$/.test(label) ? `${label}\\` : parts.slice(0, index + 1).join("\\"),
+  }));
+}
+
+function localizedLocation(label: string, language: UiLanguage) {
+  if (language !== "zh-CN") return label;
+  return ({ Home: "主页", Desktop: "桌面", Documents: "文档", Downloads: "下载", Pictures: "图片" } as Record<string, string>)[label] ?? label;
+}
+
+function EntryIcon({ entry }: { entry: FileEntry }) {
+  const kind = iconKindFor(entry);
+  const common = { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.7, strokeLinecap: "round" as const, strokeLinejoin: "round" as const, "aria-hidden": true };
+  if (kind === "folder") return <svg {...common}><path className="icon-fill" d="M3.5 6.8c0-1 .8-1.8 1.8-1.8h4l2 2h7.4c1 0 1.8.8 1.8 1.8v8.4c0 1-.8 1.8-1.8 1.8H5.3c-1 0-1.8-.8-1.8-1.8V6.8Z" /><path d="M3.8 8.5h16.4" /></svg>;
+  if (kind === "image") return <svg {...common}><rect x="3.5" y="4" width="17" height="16" rx="2.4" /><circle cx="8.5" cy="9" r="1.4" /><path d="m5.5 17 4.1-4 2.8 2.5 2.1-2 4 3.5" /></svg>;
+  if (kind === "video") return <svg {...common}><rect x="3.5" y="5" width="17" height="14" rx="2.4" /><path className="icon-fill" d="m10 9 5 3-5 3V9Z" /></svg>;
+  if (kind === "audio") return <svg {...common}><path d="M9.5 17.2V6.8L18 5v9.9" /><circle className="icon-fill" cx="6.8" cy="17.2" r="2.7" /><circle className="icon-fill" cx="15.3" cy="14.9" r="2.7" /></svg>;
+  if (kind === "archive") return <svg {...common}><path d="M7 3.8h8l3 3V20H7V3.8Z" /><path d="M10.5 4v2m0 2v2m0 2v2m0 2v2" /><path d="M15 4v3h3" /></svg>;
+  if (kind === "code") return <svg {...common}><path d="M7 3.8h8l3 3V20H7V3.8Z" /><path d="M15 4v3h3M11 11l-2 2 2 2m3-4 2 2-2 2" /></svg>;
+  if (kind === "pdf") return <svg {...common}><path className="icon-fill" d="M7 3.8h8l3 3V20H7V3.8Z" /><path d="M15 4v3h3M9.3 14.8h5.4M9.3 11.8h5.4" /></svg>;
+  if (kind === "app") return <svg {...common}><rect x="3.5" y="3.5" width="17" height="17" rx="3" /><path d="M8 8h3v3H8V8Zm5 0h3v3h-3V8Zm-5 5h3v3H8v-3Zm5 0h3v3h-3v-3Z" /></svg>;
+  if (kind === "document") return <svg {...common}><path d="M7 3.8h8l3 3V20H7V3.8Z" /><path d="M15 4v3h3M9.5 11h5m-5 3h5m-5 3H13" /></svg>;
+  return <svg {...common}><path d="M7 3.8h8l3 3V20H7V3.8Z" /><path d="M15 4v3h3" /></svg>;
+}
+
+function ChevronIcon() {
+  return <svg className="chevron-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 6 3.5 3.5L11.5 6" /></svg>;
+}
+
+function SortIcon() {
+  return <svg className="toolbar-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M6 3v14m0 0-3-3m3 3 3-3M14 17V3m0 0-3 3m3-3 3 3" /></svg>;
+}
+
+function ViewIcon() {
+  return <svg className="toolbar-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5h2m3 0h9M3 10h2m3 0h9M3 15h2m3 0h9" /></svg>;
+}
+
+function ActionsIcon() {
+  return <svg className="toolbar-icon" viewBox="0 0 20 20" aria-hidden="true"><circle cx="4" cy="10" r="1" /><circle cx="10" cy="10" r="1" /><circle cx="16" cy="10" r="1" /></svg>;
+}
+
+function SettingsIcon() {
+  return <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="2.5" /><path d="M10 2.5v2m0 11v2M2.5 10h2m11 0h2M4.7 4.7l1.4 1.4m7.8 7.8 1.4 1.4m0-10.6-1.4 1.4m-7.8 7.8-1.4 1.4" /></svg>;
+}
+
+function SpaceHealthIcon() {
+  return <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 15.5V10m4.3 5.5V6.8m4.4 8.7V9m4.3 6.5V4.5" /><path d="M2.8 17.2h14.4" /></svg>;
+}
+
+function FolderGlyph() {
+  return <svg className="tree-folder-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M2.8 5.8c0-.9.7-1.6 1.6-1.6h3.4l1.8 1.9h6c.9 0 1.6.7 1.6 1.6v6.5c0 .9-.7 1.6-1.6 1.6H4.4c-.9 0-1.6-.7-1.6-1.6V5.8Z" /><path d="M3.1 7.4h13.8" /></svg>;
+}
+
+function isThumbnailCandidate(entry: FileEntry) {
+  return !entry.isDirectory && ["jpg", "jpeg", "png", "webp", "gif", "bmp"].includes(entry.extension?.toLowerCase() ?? "");
+}
+
+function detailLabel(key: string, language: UiLanguage) {
+  const labels: Record<string, [string, string]> = {
+    dimensions: ["尺寸", "Dimensions"], camera: ["相机", "Camera"], lens: ["镜头", "Lens"], captured: ["拍摄时间", "Captured"], aperture: ["光圈", "Aperture"], exposure: ["曝光时间", "Exposure"], iso: ["ISO", "ISO"], focalLength: ["焦距", "Focal length"],
+    title: ["标题", "Title"], artist: ["歌手", "Artist"], album: ["专辑", "Album"], genre: ["流派", "Genre"], year: ["年份", "Year"], track: ["音轨", "Track"], bitrate: ["比特率", "Bitrate"], sampleRate: ["采样率", "Sample rate"], bitDepth: ["位深", "Bit depth"], channels: ["声道数", "Channels"],
+  };
+  return labels[key]?.[language === "zh-CN" ? 0 : 1] ?? key;
+}
+
+function PreviewContent({ entry, preview, loading, language, onOpen, onTextPage }: { entry: FileEntry; preview: FilePreview | null; loading: boolean; language: UiLanguage; onOpen: () => void; onTextPage: (encoding: string, offset: number) => void }) {
+  const text = UI_COPY[language];
+  const sourceUrl = !entry.isDirectory ? convertFileSrc(entry.path) : "";
+  const [pdfPage, setPdfPage] = useState(1);
+  const [pdfZoom, setPdfZoom] = useState(100);
+  const [mediaInfo, setMediaInfo] = useState<{ duration: number; width: number; height: number } | null>(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [details, setDetails] = useState<FileDetails | null>(null);
+  const [detailsLoading, setDetailsLoading] = useState(false);
+  useEffect(() => {
+    setPdfPage(1);
+    setPdfZoom(100);
+    setMediaInfo(null);
+    setDetailsOpen(false);
+    setDetails(null);
+    setDetailsLoading(false);
+  }, [entry.path]);
+  const textPage = preview?.kind === "text" ? Math.floor(preview.textOffset / TEXT_PREVIEW_CHUNK) + 1 : 1;
+  const textPages = preview?.kind === "text" ? Math.max(1, Math.ceil(preview.totalBytes / TEXT_PREVIEW_CHUNK)) : 1;
+  const pdfUrl = `${sourceUrl}#page=${pdfPage}&zoom=${pdfZoom}`;
+  const detailsSupported = ["image", "svg", "heic", "audio"].includes(preview?.kind ?? "");
+  async function toggleDetails() {
+    const nextOpen = !detailsOpen;
+    setDetailsOpen(nextOpen);
+    if (!nextOpen || details || detailsLoading) return;
+    setDetailsLoading(true);
+    try {
+      setDetails(await invoke<FileDetails>("load_file_details", { path: entry.path }));
+    } catch {
+      setDetails({ items: [] });
+    } finally {
+      setDetailsLoading(false);
+    }
+  }
+  const media = loading ? <span className="preview-spinner" />
+    : preview?.kind === "image" && preview.dataUrl ? <img src={preview.dataUrl} alt="" />
+      : (preview?.kind === "svg" || preview?.kind === "heic") ? <img src={sourceUrl} alt="" />
+        : preview?.kind === "pdf" ? <div className="pdf-preview-shell"><div className="preview-toolstrip"><button disabled={pdfPage <= 1} onClick={() => setPdfPage((page) => Math.max(1, page - 1))}>‹</button><label>{language === "zh-CN" ? "第" : "Page"}<input type="number" min="1" value={pdfPage} onChange={(event) => setPdfPage(Math.max(1, Number(event.target.value) || 1))} />{language === "zh-CN" ? "页" : ""}</label><button onClick={() => setPdfPage((page) => page + 1)}>›</button><span /><button disabled={pdfZoom <= 50} onClick={() => setPdfZoom((zoom) => Math.max(50, zoom - 25))}>−</button><b>{pdfZoom}%</b><button disabled={pdfZoom >= 200} onClick={() => setPdfZoom((zoom) => Math.min(200, zoom + 25))}>＋</button></div><iframe key={pdfUrl} src={pdfUrl} title={entry.name} /></div>
+          : preview?.kind === "video" ? <video src={sourceUrl} controls preload="metadata" onLoadedMetadata={(event) => setMediaInfo({ duration: event.currentTarget.duration, width: event.currentTarget.videoWidth, height: event.currentTarget.videoHeight })} />
+            : preview?.kind === "audio" ? <audio src={sourceUrl} controls preload="metadata" onLoadedMetadata={(event) => setMediaInfo({ duration: event.currentTarget.duration, width: 0, height: 0 })} />
+              : preview?.kind === "text" ? <div className="text-preview-shell"><div className="preview-toolstrip"><select aria-label={language === "zh-CN" ? "文本编码" : "Text encoding"} value={preview.encoding ?? "utf-8"} onChange={(event) => onTextPage(event.target.value, 0)}><option value="utf-8">UTF-8</option><option value="gbk">GBK / GB18030</option><option value="big5">Big5</option><option value="windows-1252">Windows-1252</option><option value="utf-16le">UTF-16 LE</option><option value="utf-16be">UTF-16 BE</option></select><span /><button disabled={preview.textOffset <= 0} onClick={() => onTextPage(preview.encoding ?? "utf-8", Math.max(0, preview.textOffset - TEXT_PREVIEW_CHUNK))}>‹</button><b>{textPage}/{textPages}</b><button disabled={!preview.truncated} onClick={() => onTextPage(preview.encoding ?? "utf-8", preview.textOffset + TEXT_PREVIEW_CHUNK)}>›</button></div><pre>{preview.text}</pre></div>
+                : <span className={`preview-generic entry-icon ${iconKindFor(entry)}-icon`}><EntryIcon entry={entry} /></span>;
+  return <div className="preview-content">
+    <div className={`preview-visual ${preview?.kind ?? "none"}`}>
+      {media}
+    </div>
+    <strong title={entry.name}>{entry.name}</strong>
+    <span>{entry.isDirectory ? text.folder : formatSize(entry.size)} · {formatDate(entry.modifiedUnixSeconds, language)}</span>
+    {mediaInfo && mediaInfo.width > 0 && <small className="media-info">{mediaInfo.width} × {mediaInfo.height}</small>}
+    {entry.isLink && entry.linkTarget && <small className="link-target" title={entry.linkTarget}>→ {entry.linkTarget}</small>}
+    {preview?.kind === "text" && textPages > 1 && <small>{language === "zh-CN" ? `分段显示，每段最多 128 KB · 第 ${textPage}/${textPages} 段` : `Shown in 128 KB chunks · Part ${textPage} of ${textPages}`}</small>}
+    {preview?.kind === "office" && <small>{text.officePreviewHint}</small>}
+    {preview?.kind === "heic" && <small>{text.codecUnavailable}</small>}
+    {preview?.kind === "none" && !entry.isDirectory && !loading && <small>{text.noPreview}</small>}
+    {detailsSupported && <section className={`preview-details ${detailsOpen ? "open" : ""}`}><button aria-expanded={detailsOpen} onClick={() => void toggleDetails()}><span>{language === "zh-CN" ? "详细信息" : "Details"}</span><i>›</i></button>{detailsOpen && <div className="preview-detail-list">{detailsLoading ? <span className="preview-spinner" /> : details?.items.length ? details.items.map((item) => <div key={item.key}><span>{detailLabel(item.key, language)}</span><strong title={item.value}>{item.value}</strong></div>) : <small>{language === "zh-CN" ? "没有可用的附加信息" : "No additional details available"}</small>}</div>}</section>}
+    <button onClick={onOpen}>{text.open}</button>
+  </div>;
+}
+
+function App() {
+  const [locations, setLocations] = useState<Location[]>([]);
+  const [tabs, setTabs] = useState<FolderTab[]>([]);
+  const [activeTabId, setActiveTabId] = useState<number | null>(null);
+  const [listing, setListing] = useState<DirectoryListing | null>(null);
+  const [address, setAddress] = useState("");
+  const [addressEditing, setAddressEditing] = useState(false);
+  const [addressSuggestions, setAddressSuggestions] = useState<PathSuggestion[]>([]);
+  const [addressSuggestionIndex, setAddressSuggestionIndex] = useState(-1);
+  const [recentPaths, setRecentPaths] = useState<string[]>(readStoredRecentPaths);
+  const [directoryEventsReady, setDirectoryEventsReady] = useState(false);
+  const [startupComplete, setStartupComplete] = useState(false);
+  const [folderSize, setFolderSize] = useState<FolderSizeState | null>(null);
+  const [unavailableLocation, setUnavailableLocation] = useState<DirectoryStatus | null>(null);
+  const [unavailablePaths, setUnavailablePaths] = useState<Set<string>>(() => new Set());
+  const [query, setQuery] = useState("");
+  const [searchPanelOpen, setSearchPanelOpen] = useState(false);
+  const [searchKind, setSearchKind] = useState<SearchKind>("all");
+  const [searchDate, setSearchDate] = useState<SearchDate>("any");
+  const [searchSize, setSearchSize] = useState<SearchSize>("any");
+  const [searchHistory, setSearchHistory] = useState<SearchHistoryItem[]>(readStoredSearchHistory);
+  const [savedSearches, setSavedSearches] = useState<SavedSearch[]>(readStoredSavedSearches);
+  const [searchResults, setSearchResults] = useState<FileEntry[] | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [searchProgress, setSearchProgress] = useState<SearchProgress | null>(null);
+  const [searchResultMeta, setSearchResultMeta] = useState<{ scanned: number; cancelled: boolean; truncated: boolean; provider: SearchProvider } | null>(null);
+  const [preferEverything, setPreferEverything] = useState(() => localStorage.getItem(SEARCH_EVERYTHING_KEY) !== "false");
+  const [everythingStatus, setEverythingStatus] = useState<EverythingStatus | null>(null);
+  const [everythingStatusBusy, setEverythingStatusBusy] = useState(false);
+  const [everythingStatusError, setEverythingStatusError] = useState<string | null>(null);
+  const [selected, setSelected] = useState<FileEntry | null>(null);
+  const [selectedPaths, setSelectedPaths] = useState<Set<string>>(() => new Set());
+  const [selectionAnchor, setSelectionAnchor] = useState<number | null>(null);
+  const [scrollTop, setScrollTop] = useState(0);
+  const [listViewportHeight, setListViewportHeight] = useState(DEFAULT_LIST_VIEWPORT_HEIGHT);
+  const [listViewportWidth, setListViewportWidth] = useState(900);
+  const [isLoading, setIsLoading] = useState(false);
+  const [status, setStatus] = useState(() => localStorage.getItem(LANGUAGE_KEY) === "en" ? "Preparing your folders…" : "正在准备文件夹…");
+  const [thumbnailCache, setThumbnailCache] = useState<Record<string, string>>({});
+  const [fileIconCache, setFileIconCache] = useState<Record<string, string>>({});
+  const [showExtensions, setShowExtensions] = useState(() => localStorage.getItem(SHOW_EXTENSIONS_KEY) !== "false");
+  const [showHidden, setShowHidden] = useState(() => localStorage.getItem(SHOW_HIDDEN_KEY) === "true");
+  const [favorites, setFavorites] = useState<FavoriteItem[]>(readStoredFavorites);
+  const [favoriteEditingPath, setFavoriteEditingPath] = useState<string | null>(null);
+  const [favoriteLabelValue, setFavoriteLabelValue] = useState("");
+  const [favoriteGroupValue, setFavoriteGroupValue] = useState("");
+  const [collapsedFavoriteGroups, setCollapsedFavoriteGroups] = useState<Set<string>>(readCollapsedFavoriteGroups);
+  const [favoriteDraggingPath, setFavoriteDraggingPath] = useState<string | null>(null);
+  const [favoriteDropPath, setFavoriteDropPath] = useState<string | null>(null);
+  const [treeChildren, setTreeChildren] = useState<Record<string, FileEntry[]>>({});
+  const [expandedTreePaths, setExpandedTreePaths] = useState<Set<string>>(() => new Set());
+  const [treeLoadingPaths, setTreeLoadingPaths] = useState<Set<string>>(() => new Set());
+  const [sortKey, setSortKey] = useState<SortKey>(readStoredSortKey);
+  const [sortDirection, setSortDirection] = useState<SortDirection>(() => localStorage.getItem(SORT_DIRECTION_KEY) === "descending" ? "descending" : "ascending");
+  const [viewMode, setViewMode] = useState<ViewMode>(readStoredViewMode);
+  const [columnWidths, setColumnWidths] = useState<ColumnWidths>(readStoredColumnWidths);
+  const [openMenu, setOpenMenu] = useState<"new" | "terminal" | "sort" | "view" | "actions" | null>(null);
+  const [actionsMenuStyle, setActionsMenuStyle] = useState<React.CSSProperties>({});
+  const [language, setLanguage] = useState<UiLanguage>(() => localStorage.getItem(LANGUAGE_KEY) === "en" ? "en" : "zh-CN");
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [folderIntegration, setFolderIntegration] = useState<FolderIntegrationStatus | null>(null);
+  const [folderIntegrationBusy, setFolderIntegrationBusy] = useState(false);
+  const [folderIntegrationError, setFolderIntegrationError] = useState<string | null>(null);
+  const [folderContextMenu, setFolderContextMenu] = useState<FolderIntegrationStatus | null>(null);
+  const [folderContextMenuBusy, setFolderContextMenuBusy] = useState(false);
+  const [folderContextMenuError, setFolderContextMenuError] = useState<string | null>(null);
+  const [spaceHealthOpen, setSpaceHealthOpen] = useState(false);
+  const [spaceScanDrive, setSpaceScanDrive] = useState("C:\\");
+  const [spaceScanRoot, setSpaceScanRoot] = useState("C:\\");
+  const [spaceScanning, setSpaceScanning] = useState(false);
+  const [spaceScanProgress, setSpaceScanProgress] = useState<SpaceScanProgress | null>(null);
+  const [spaceScanResult, setSpaceScanResult] = useState<SpaceScanResult | null>(null);
+  const [spacePreviousSnapshot, setSpacePreviousSnapshot] = useState<SpaceScanSnapshot | null>(null);
+  const [spaceScanError, setSpaceScanError] = useState<string | null>(null);
+  const [spaceAdviceCategoryId, setSpaceAdviceCategoryId] = useState<string | null>(null);
+  const [spaceCleanupPreview, setSpaceCleanupPreview] = useState<SpaceCleanupPreview | null>(null);
+  const [spaceCleanupLoading, setSpaceCleanupLoading] = useState(false);
+  const [spaceCleanupSelected, setSpaceCleanupSelected] = useState<Set<string>>(() => new Set());
+  const [spaceCleanupAge, setSpaceCleanupAge] = useState<SpaceCleanupAge>("all");
+  const [spaceCleanupConfirmOpen, setSpaceCleanupConfirmOpen] = useState(false);
+  const [spaceCleanupAcknowledged, setSpaceCleanupAcknowledged] = useState(false);
+  const [spaceCleanupMessage, setSpaceCleanupMessage] = useState<string | null>(null);
+  const [spaceCleanupError, setSpaceCleanupError] = useState<string | null>(null);
+  const [duplicateScanning, setDuplicateScanning] = useState(false);
+  const [duplicateProgress, setDuplicateProgress] = useState<DuplicateScanProgress | null>(null);
+  const [duplicateResult, setDuplicateResult] = useState<DuplicateScanResult | null>(null);
+  const [duplicateError, setDuplicateError] = useState<string | null>(null);
+  const [duplicateCleanupSelected, setDuplicateCleanupSelected] = useState<Set<string>>(() => new Set());
+  const [duplicateCleanupConfirmOpen, setDuplicateCleanupConfirmOpen] = useState(false);
+  const [duplicateCleanupAcknowledged, setDuplicateCleanupAcknowledged] = useState(false);
+  const [duplicateCleanupBusy, setDuplicateCleanupBusy] = useState(false);
+  const [duplicateCleanupMessage, setDuplicateCleanupMessage] = useState<string | null>(null);
+  const [duplicateFilterQuery, setDuplicateFilterQuery] = useState("");
+  const [duplicateSizeFilter, setDuplicateSizeFilter] = useState<DuplicateSizeFilter>("all");
+  const [duplicateTypeFilter, setDuplicateTypeFilter] = useState<DuplicateTypeFilter>("all");
+  const [claudeProvider, setClaudeProvider] = useState<ClaudeProvider>(() => localStorage.getItem(CLAUDE_PROVIDER_KEY) === "anthropic" ? "anthropic" : "deepseek");
+  const [claudeFullAccess, setClaudeFullAccess] = useState(() => localStorage.getItem(CLAUDE_FULL_ACCESS_KEY) !== "false");
+  const [claudeCredential, setClaudeCredential] = useState<ClaudeCredentialStatus | null>(null);
+  const [claudeApiKeyDraft, setClaudeApiKeyDraft] = useState("");
+  const [claudeCredentialBusy, setClaudeCredentialBusy] = useState(false);
+  const [claudeCredentialError, setClaudeCredentialError] = useState<string | null>(null);
+  const [claudeDiagnostic, setClaudeDiagnostic] = useState<ClaudeDiagnostic | null>(null);
+  const [claudeDiagnosticBusy, setClaudeDiagnosticBusy] = useState(false);
+  const [previewPaneOpen, setPreviewPaneOpen] = useState(() => localStorage.getItem(PREVIEW_PANE_KEY) === "true");
+  const [preview, setPreview] = useState<FilePreview | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [quickPreviewOpen, setQuickPreviewOpen] = useState(false);
+  const [clipboard, setClipboard] = useState<ClipboardState | null>(null);
+  const [undoStack, setUndoStack] = useState<UndoRecord[]>(readStoredUndoStack);
+  const [undoBusy, setUndoBusy] = useState(false);
+  const [operation, setOperation] = useState<RunningOperation | null>(null);
+  const [operationTasks, setOperationTasks] = useState<TransferTask[]>(readStoredOperationTasks);
+  const [taskCenterOpen, setTaskCenterOpen] = useState(false);
+  const [operationIssues, setOperationIssues] = useState<OperationIssue[]>([]);
+  const [retryTransfer, setRetryTransfer] = useState<RetryTransfer | null>(null);
+  const [pendingTransfer, setPendingTransfer] = useState<PendingTransfer | null>(null);
+  const [applyConflictToRemaining, setApplyConflictToRemaining] = useState(true);
+  const [dragTarget, setDragTarget] = useState<string | null>(null);
+  const [dragGhost, setDragGhost] = useState<DragGhost | null>(null);
+  const [draggedTabId, setDraggedTabId] = useState<number | null>(null);
+  const [tabDropId, setTabDropId] = useState<number | null>(null);
+  const [tabDropSide, setTabDropSide] = useState<"before" | "after">("before");
+  const [selectionBox, setSelectionBox] = useState<SelectionBox | null>(null);
+  const [renamingPath, setRenamingPath] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [renameError, setRenameError] = useState<string | null>(null);
+  const [deleteRequest, setDeleteRequest] = useState<DeleteRequest | null>(null);
+  const [batchRenameOpen, setBatchRenameOpen] = useState(false);
+  const [batchRenameDraft, setBatchRenameDraft] = useState<BatchRenameDraft>({ find: "", replace: "", prefix: "", suffix: "", addNumbers: false, startNumber: 1 });
+  const [batchRenameError, setBatchRenameError] = useState<string | null>(null);
+  const [archiveBusy, setArchiveBusy] = useState(false);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; kind: "entry" | "background" } | null>(null);
+  const [tabContextMenu, setTabContextMenu] = useState<{ x: number; y: number; tabId: number } | null>(null);
+  const [closedTabs, setClosedTabs] = useState<FolderTab[]>([]);
+  const [historyMenu, setHistoryMenu] = useState<{ x: number; y: number; items: { index: number; path: string }[] } | null>(null);
+  const fileListRef = useRef<HTMLDivElement>(null);
+  const addressInputRef = useRef<HTMLInputElement>(null);
+  const renameInputRef = useRef<HTMLInputElement>(null);
+  const pointerDragRef = useRef<{ paths: string[]; startX: number; startY: number; target: string | null; active: boolean; dropAllowed: boolean } | null>(null);
+  const marqueeRef = useRef<(SelectionBox & { pointerId: number; initialPaths: Set<string>; clientX: number; clientY: number; animationFrame: number | null }) | null>(null);
+  const nativeDropPathsRef = useRef<string[]>([]);
+  const tabHoverRef = useRef<{ path: string; timer: number } | null>(null);
+  const tabReorderRef = useRef<{ tabId: number; startX: number; startY: number; active: boolean; targetId: number | null; side: "before" | "after" } | null>(null);
+  const suppressTabClickRef = useRef(false);
+  const sessionReadyRef = useRef(false);
+  const startupStartedRef = useRef(false);
+  const tabsRef = useRef<FolderTab[]>([]);
+  const externalTabSeedRef = useRef(0);
+  const searchJobIdRef = useRef<string | null>(null);
+  const directoryLoadJobIdRef = useRef<string | null>(null);
+  const thumbnailJobIdRef = useRef<string | null>(null);
+  const listingRef = useRef<DirectoryListing | null>(null);
+  const addressSuggestionRequestRef = useRef(0);
+  const folderSizeJobIdRef = useRef<string | null>(null);
+  const spaceScanJobIdRef = useRef<string | null>(null);
+  const duplicateScanJobIdRef = useRef<string | null>(null);
+  const availabilityCheckRef = useRef(false);
+  const backgroundAvailabilityCheckRef = useRef(false);
+  const unavailablePathsRef = useRef<Set<string>>(new Set());
+  const directoryStatusRequestsRef = useRef<Map<string, Promise<DirectoryStatus>>>(new Map());
+  const availabilityRetryRef = useRef<Map<string, { failures: number; nextAt: number }>>(new Map());
+  const unavailableLocationRef = useRef<DirectoryStatus | null>(null);
+  const previewRequestRef = useRef(0);
+  const operationExecutorRef = useRef<string | null>(null);
+  const text = UI_COPY[language];
+  const latestUndo = undoStack[undoStack.length - 1] ?? null;
+  const undoAction = latestUndo?.action ?? null;
+  const currentConflict = pendingTransfer?.conflicts[pendingTransfer.currentIndex] ?? null;
+  const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? null;
+  const contextTab = tabContextMenu ? tabs.find((tab) => tab.id === tabContextMenu.tabId) ?? null : null;
+  const currentLocation = locations.find((location) => location.path.toLocaleLowerCase() === listing?.path.toLocaleLowerCase());
+  const unavailableCopy = unavailableLocation ? unavailableLocationCopy(unavailableLocation, language) : null;
+  const currentLabel = searchResults ? text.searchResults : currentLocation ? localizedLocation(currentLocation.label, language) : listing ? labelForPath(listing.path) : text.loading;
+  const crumbs = listing ? pathCrumbs(listing.path) : [];
+  const currentIsFavorite = !!listing && favorites.some((favorite) => favorite.path.toLocaleLowerCase() === listing.path.toLocaleLowerCase());
+  const favoriteSections = useMemo(() => {
+    const sections = new Map<string, FavoriteItem[]>();
+    for (const favorite of favorites) {
+      const group = favorite.group?.trim() ?? "";
+      sections.set(group, [...(sections.get(group) ?? []), favorite]);
+    }
+    return [...sections.entries()];
+  }, [favorites]);
+  const treeRoots = useMemo(() => {
+    const home = locations.find((location) => location.label === "Home");
+    const drives = locations.filter((location) => /^[A-Za-z]:\\$/.test(location.path));
+    const roots = home ? [home, ...drives] : drives;
+    return roots.filter((location, index) => roots.findIndex((candidate) => candidate.path.toLocaleLowerCase() === location.path.toLocaleLowerCase()) === index);
+  }, [locations]);
+
+  useEffect(() => {
+    listingRef.current = listing;
+  }, [listing]);
+
+  useEffect(() => {
+    tabsRef.current = tabs;
+  }, [tabs]);
+
+  useEffect(() => {
+    unavailableLocationRef.current = unavailableLocation;
+  }, [unavailableLocation]);
+
+  useEffect(() => {
+    unavailablePathsRef.current = unavailablePaths;
+  }, [unavailablePaths]);
+
+  function rememberPath(path: string) {
+    setRecentPaths((current) => {
+      const normalized = path.toLocaleLowerCase();
+      const next = [path, ...current.filter((candidate) => candidate.toLocaleLowerCase() !== normalized)].slice(0, 20);
+      localStorage.setItem(RECENT_PATHS_KEY, JSON.stringify(next));
+      return next;
+    });
+  }
+
+  function mergeAvailableLocations(latest: Location[]) {
+    setLocations((current) => {
+      const latestPaths = new Set(latest.map((location) => location.path.toLocaleLowerCase()));
+      const disconnectedDrives = current
+        .filter((location) => /^[A-Za-z]:\\$/.test(location.path) && !latestPaths.has(location.path.toLocaleLowerCase()))
+        .map((location) => ({ ...location, totalSpace: null, availableSpace: null, isAvailable: false }));
+      return [...latest, ...disconnectedDrives];
+    });
+  }
+
+  function markPathAvailability(path: string, available: boolean) {
+    const key = path.toLocaleLowerCase();
+    setUnavailablePaths((current) => {
+      if (current.has(key) === !available) return current;
+      const next = new Set(current);
+      if (available) next.delete(key); else next.add(key);
+      unavailablePathsRef.current = next;
+      return next;
+    });
+  }
+
+  function checkDirectoryStatusWithTimeout(path: string, timeoutMs = 4_000): Promise<DirectoryStatus> {
+    const key = path.toLocaleLowerCase();
+    let request = directoryStatusRequestsRef.current.get(key);
+    if (!request) {
+      const base = invoke<DirectoryStatus>("check_directory_status", { path }).catch(() => ({ path, available: false, kind: directoryKindForPath(path), reason: "unknown" as const }));
+      request = base.finally(() => {
+        if (directoryStatusRequestsRef.current.get(key) === request) directoryStatusRequestsRef.current.delete(key);
+      });
+      directoryStatusRequestsRef.current.set(key, request);
+    }
+    return new Promise((resolve) => {
+      let settled = false;
+      const timer = window.setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        resolve({ path, available: false, kind: directoryKindForPath(path), reason: "timeout" });
+      }, timeoutMs);
+      request!.then((result) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timer);
+        resolve(result);
+      });
+    });
+  }
+
+  function updateAvailabilityRetry(status: DirectoryStatus) {
+    const key = status.path.toLocaleLowerCase();
+    if (status.available) {
+      availabilityRetryRef.current.delete(key);
+      return;
+    }
+    const previous = availabilityRetryRef.current.get(key)?.failures ?? 0;
+    const failures = Math.min(previous + 1, 5);
+    const delay = Math.min(120_000, 8_000 * (2 ** Math.max(0, failures - 1)));
+    availabilityRetryRef.current.set(key, { failures, nextAt: Date.now() + delay });
+  }
+
+  useEffect(() => {
+    if (!addressEditing) {
+      setAddressSuggestions([]);
+      setAddressSuggestionIndex(-1);
+      return;
+    }
+    const requestId = ++addressSuggestionRequestRef.current;
+    const timer = window.setTimeout(() => {
+      void invoke<PathSuggestion[]>("suggest_paths", { input: address, recentPaths })
+        .then((suggestions) => {
+          if (requestId !== addressSuggestionRequestRef.current) return;
+          setAddressSuggestions(suggestions);
+          setAddressSuggestionIndex(-1);
+        })
+        .catch(() => {
+          if (requestId === addressSuggestionRequestRef.current) setAddressSuggestions([]);
+        });
+    }, 90);
+    return () => window.clearTimeout(timer);
+  }, [addressEditing, address, recentPaths]);
+
+  useEffect(() => () => {
+    const directoryJobId = directoryLoadJobIdRef.current;
+    const thumbnailJobId = thumbnailJobIdRef.current;
+    const folderSizeJobId = folderSizeJobIdRef.current;
+    if (directoryJobId) void invoke("cancel_directory_load", { jobId: directoryJobId }).catch(() => undefined);
+    if (thumbnailJobId) void invoke("cancel_thumbnail_job", { jobId: thumbnailJobId }).catch(() => undefined);
+    if (folderSizeJobId) void invoke("cancel_folder_size", { jobId: folderSizeJobId }).catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    if (!directoryEventsReady || startupStartedRef.current) return;
+    startupStartedRef.current = true;
+    let disposed = false;
+    const loadStartupDirectory = async (path: string) => {
+      const previousJobId = directoryLoadJobIdRef.current;
+      if (previousJobId) void invoke("cancel_directory_load", { jobId: previousJobId }).catch(() => undefined);
+      const jobId = crypto.randomUUID();
+      directoryLoadJobIdRef.current = jobId;
+      setIsLoading(true);
+      setListing({ path, entries: [], folderCount: 0, fileCount: 0 });
+      setAddress(path);
+      setStatus(language === "zh-CN" ? "正在恢复上次打开的文件夹…" : "Restoring your last folder…");
+      try {
+        const result = await invoke<DirectoryListing>("list_directory_progressive", { jobId, path });
+        if (disposed || directoryLoadJobIdRef.current !== jobId) throw new Error("Directory loading cancelled.");
+        return result;
+      } finally {
+        if (directoryLoadJobIdRef.current === jobId) {
+          directoryLoadJobIdRef.current = null;
+          setIsLoading(false);
+        }
+      }
+    };
+    void (async () => {
+      try {
+        const availableLocations = await invoke<Location[]>("get_locations");
+        if (disposed) return;
+        setLocations(availableLocations);
+        const initial = availableLocations[0];
+        if (!initial) throw new Error("No accessible folders were found.");
+        const storedSession = readStoredSession();
+        let restoredTabs = storedSession?.tabs ?? [];
+        let restoredActiveId = storedSession?.activeTabId ?? null;
+        let restoredActive = restoredTabs.find((tab) => tab.id === restoredActiveId) ?? null;
+        let nextListing: DirectoryListing;
+        let startupUnavailable: DirectoryStatus | null = null;
+        if (restoredActive) {
+          try {
+            nextListing = await loadStartupDirectory(restoredActive.path);
+          } catch {
+            if (disposed) return;
+            const path = restoredActive.path;
+            startupUnavailable = { path, available: false, kind: path.startsWith("\\\\") ? "network" : /^[A-Za-z]:/.test(path) ? "drive" : "folder", reason: "unknown" };
+            nextListing = { path, entries: [], folderCount: 0, fileCount: 0 };
+            unavailableLocationRef.current = startupUnavailable;
+            setUnavailableLocation(startupUnavailable);
+            markPathAvailability(path, false);
+          }
+        } else {
+          const initialTab: FolderTab = { id: Date.now(), path: initial.path, label: initial.label, pinned: true, history: [initial.path], historyIndex: 0, scrollTop: 0, viewMode: readStoredViewMode(), selectedPaths: [] };
+          restoredTabs = [initialTab];
+          restoredActiveId = initialTab.id;
+          restoredActive = initialTab;
+          nextListing = await loadStartupDirectory(initial.path);
+        }
+        if (disposed) return;
+        setTabs(restoredTabs);
+        setActiveTabId(restoredActiveId);
+        setListing(nextListing);
+        setAddress(nextListing.path);
+        if (restoredActive) {
+          const existingPaths = new Set(nextListing.entries.map((entry) => entry.path));
+          const restoredSelection = restoredActive.selectedPaths.filter((path) => existingPaths.has(path));
+          setViewMode(restoredActive.viewMode);
+          setSelectedPaths(new Set(restoredSelection));
+          setSelected(nextListing.entries.find((entry) => entry.path === restoredSelection[0]) ?? null);
+          setScrollTop(restoredActive.scrollTop);
+          window.requestAnimationFrame(() => { if (fileListRef.current) fileListRef.current.scrollTop = restoredActive!.scrollTop; });
+        }
+        rememberPath(nextListing.path);
+        setStatus(startupUnavailable
+          ? (language === "zh-CN" ? "上次打开的位置暂时不可用，正在等待恢复…" : "The last location is unavailable. Waiting for it to return…")
+          : (language === "zh-CN" ? `${nextListing.folderCount} 个文件夹 · ${nextListing.fileCount} 个文件` : `${nextListing.folderCount} folders · ${nextListing.fileCount} files`));
+        sessionReadyRef.current = true;
+      } catch (error) {
+        if (!disposed) setStatus(language === "zh-CN" ? `无法启动文件浏览器：${String(error)}` : `Could not start the file browser: ${String(error)}`);
+      } finally {
+        if (!disposed) setStartupComplete(true);
+      }
+    })();
+    return () => {
+      disposed = true;
+      startupStartedRef.current = false;
+    };
+  }, [directoryEventsReady]);
+
+  useEffect(() => {
+    if (!sessionReadyRef.current || !tabs.length || activeTabId === null) return;
+    localStorage.setItem(SESSION_KEY, JSON.stringify({ tabs, activeTabId }));
+  }, [tabs, activeTabId]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => localStorage.setItem(UNDO_STACK_KEY, JSON.stringify(undoStack)), 150);
+    return () => window.clearTimeout(timer);
+  }, [undoStack]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => localStorage.setItem(OPERATION_TASKS_KEY, JSON.stringify(operationTasks.slice(-20))), 300);
+    return () => window.clearTimeout(timer);
+  }, [operationTasks]);
+
+  useEffect(() => {
+    if (!sessionReadyRef.current || activeTabId === null) return;
+    const timer = window.setTimeout(() => {
+      setTabs((current) => current.map((tab) => tab.id === activeTabId ? { ...tab, scrollTop, viewMode, selectedPaths: [...selectedPaths] } : tab));
+    }, 220);
+    return () => window.clearTimeout(timer);
+  }, [activeTabId, scrollTop, viewMode, selectedPaths]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      void invoke<Location[]>("get_locations").then(mergeAvailableLocations).catch(() => undefined);
+    }, 15_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.lang = language;
+    if (listing) setStatus(language === "zh-CN" ? `${listing.folderCount} 个文件夹 · ${listing.fileCount} 个文件` : `${listing.folderCount} folders · ${listing.fileCount} files`);
+  }, [language]);
+
+  useEffect(() => {
+    void invoke<ClaudeCredentialStatus>("get_claude_credential_status")
+      .then(setClaudeCredential)
+      .catch((error) => setClaudeCredentialError(String(error)));
+  }, []);
+
+  useEffect(() => {
+    if (!settingsOpen) return;
+    setEverythingStatusBusy(true);
+    setEverythingStatusError(null);
+    void invoke<EverythingStatus>("get_everything_status")
+      .then(setEverythingStatus)
+      .catch((error) => setEverythingStatusError(String(error)))
+      .finally(() => setEverythingStatusBusy(false));
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") setSettingsOpen(false); };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [settingsOpen]);
+
+  useEffect(() => {
+    if (!deleteRequest) return;
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") setDeleteRequest(null); };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [deleteRequest]);
+
+  useEffect(() => {
+    if (!renamingPath) return;
+    const frame = window.requestAnimationFrame(() => {
+      const input = renameInputRef.current;
+      if (!input) return;
+      input.focus();
+      const dot = selected?.isDirectory ? -1 : renameValue.lastIndexOf(".");
+      input.setSelectionRange(0, dot > 0 ? dot : renameValue.length);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [renamingPath]);
+
+  useEffect(() => {
+    if (!contextMenu && !tabContextMenu && !historyMenu) return;
+    const close = () => { setContextMenu(null); setTabContextMenu(null); setHistoryMenu(null); };
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") close(); };
+    window.addEventListener("pointerdown", close);
+    window.addEventListener("keydown", closeOnEscape);
+    window.addEventListener("resize", close);
+    window.addEventListener("blur", close);
+    return () => { window.removeEventListener("pointerdown", close); window.removeEventListener("keydown", closeOnEscape); window.removeEventListener("resize", close); window.removeEventListener("blur", close); };
+  }, [contextMenu, tabContextMenu, historyMenu]);
+
+  useEffect(() => {
+    if (!openMenu) return;
+    const closeOutside = (event: PointerEvent) => {
+      if (!(event.target instanceof Element) || !event.target.closest(".menu-anchor")) setOpenMenu(null);
+    };
+    const closeMenu = () => setOpenMenu(null);
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") setOpenMenu(null); };
+    window.addEventListener("pointerdown", closeOutside);
+    window.addEventListener("keydown", closeOnEscape);
+    window.addEventListener("blur", closeMenu);
+    window.addEventListener("resize", closeMenu);
+    return () => { window.removeEventListener("pointerdown", closeOutside); window.removeEventListener("keydown", closeOnEscape); window.removeEventListener("blur", closeMenu); window.removeEventListener("resize", closeMenu); };
+  }, [openMenu]);
+
+  const sortedEntries = useMemo(() => {
+    const normalized = searchResults ? "" : query.trim().toLocaleLowerCase();
+    const source = searchResults ?? listing?.entries ?? [];
+    const available = showHidden ? source : source.filter((entry) => !entry.isHidden);
+    const entries = normalized ? available.filter((entry) => entry.name.toLocaleLowerCase().includes(normalized)) : [...available];
+    return sortEntriesForView(entries, sortKey, sortDirection, language);
+  }, [listing, searchResults, query, sortKey, sortDirection, language, showHidden]);
+  const selectedEntries = useMemo(() => sortedEntries.filter((entry) => selectedPaths.has(entry.path)), [sortedEntries, selectedPaths]);
+  const batchRenamePreview = useMemo(() => selectedEntries.map((entry, index) => ({ entry, name: batchNameFor(entry, batchRenameDraft, index, selectedEntries.length) })), [selectedEntries, batchRenameDraft]);
+  useLayoutEffect(() => {
+    const element = fileListRef.current;
+    if (!element) return;
+    const measure = () => {
+      setListViewportHeight(Math.max(1, Math.floor(element.clientHeight)));
+      setListViewportWidth(Math.max(1, Math.floor(element.clientWidth)));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+  const gridColumns = viewMode === "grid" ? Math.max(1, Math.floor((listViewportWidth - 20) / 148)) : 1;
+  const rowHeight = viewMode === "compact" ? 42 : viewMode === "grid" ? 142 : 56;
+  const firstVisibleRow = Math.max(0, Math.floor(scrollTop / rowHeight) - 3);
+  const firstVisible = firstVisibleRow * gridColumns;
+  const visibleRows = Math.ceil(listViewportHeight / rowHeight) + 6;
+  const visibleEntries = sortedEntries.slice(firstVisible, firstVisible + visibleRows * gridColumns);
+  const virtualHeight = Math.ceil(sortedEntries.length / gridColumns) * rowHeight;
+  const visibleImagePaths = visibleEntries.filter(isThumbnailCandidate).map((entry) => entry.path);
+  const visibleImageKey = visibleImagePaths.join("\u0000");
+  const visibleIconPaths = visibleEntries.filter((entry) => !isThumbnailCandidate(entry)).map((entry) => entry.path);
+  const visibleIconKey = visibleIconPaths.join("\u0000");
+
+  useEffect(() => {
+    let disposed = false;
+    let stopListening: (() => void) | undefined;
+    void listen<OperationScanProgress>("file-operation-progress", ({ payload }) => {
+      setOperation((current) => {
+        if (!current || current.jobId !== payload.jobId) return current;
+        const elapsedSeconds = Math.max(0.25, (Date.now() - current.startedAt) / 1000);
+        return { ...current, ...payload, speed: payload.phase === "transfer" ? payload.processedBytes / elapsedSeconds : 0 };
+      });
+      setOperationTasks((current) => current.map((task) => {
+        if (task.jobId !== payload.jobId) return task;
+        const elapsedSeconds = Math.max(0.25, (Date.now() - task.startedAt) / 1000);
+        return { ...task, ...payload, speed: payload.phase === "transfer" ? payload.processedBytes / elapsedSeconds : 0 };
+      }));
+    }).then((unlisten) => {
+      if (disposed) unlisten(); else stopListening = unlisten;
+    });
+    return () => { disposed = true; stopListening?.(); };
+  }, []);
+
+  useEffect(() => {
+    let disposed = false;
+    let stopListening: (() => void) | undefined;
+    void listen<DuplicateScanProgress>("duplicate-scan-progress", ({ payload }) => {
+      if (!disposed && payload.jobId === duplicateScanJobIdRef.current) setDuplicateProgress(payload);
+    }).then((unlisten) => {
+      if (disposed) unlisten(); else stopListening = unlisten;
+    });
+    return () => {
+      disposed = true;
+      stopListening?.();
+      const jobId = duplicateScanJobIdRef.current;
+      if (jobId) void invoke("cancel_duplicate_scan", { jobId }).catch(() => undefined);
+    };
+  }, []);
+
+  useEffect(() => {
+    let disposed = false;
+    let stopListening: (() => void) | undefined;
+    void listen<SpaceScanProgress>("space-scan-progress", ({ payload }) => {
+      if (!disposed && payload.jobId === spaceScanJobIdRef.current) setSpaceScanProgress(payload);
+    }).then((unlisten) => {
+      if (disposed) unlisten(); else stopListening = unlisten;
+    });
+    return () => {
+      disposed = true;
+      stopListening?.();
+      const jobId = spaceScanJobIdRef.current;
+      if (jobId) void invoke("cancel_space_scan", { jobId }).catch(() => undefined);
+    };
+  }, []);
+
+  useEffect(() => {
+    let disposed = false;
+    let stopListening: (() => void) | undefined;
+    void listen<DirectoryLoadProgress>("directory-load-progress", ({ payload }) => {
+      if (disposed || payload.jobId !== directoryLoadJobIdRef.current) return;
+      setListing((current) => {
+        const sameDirectory = current?.path.toLocaleLowerCase() === payload.path.toLocaleLowerCase();
+        return {
+          path: payload.path,
+          entries: sameDirectory ? [...current.entries, ...payload.entries] : payload.entries,
+          folderCount: payload.folderCount,
+          fileCount: payload.fileCount,
+        };
+      });
+      setAddress(payload.path);
+      setStatus(language === "zh-CN" ? `正在载入… ${payload.scanned} 项` : `Loading… ${payload.scanned} items`);
+    }).then((unlisten) => {
+      if (disposed) unlisten();
+      else {
+        stopListening = unlisten;
+        setDirectoryEventsReady(true);
+      }
+    }).catch(() => {
+      if (!disposed) setDirectoryEventsReady(true);
+    });
+    return () => { disposed = true; stopListening?.(); };
+  }, [language]);
+
+  useEffect(() => {
+    let disposed = false;
+    let stopListening: (() => void) | undefined;
+    void listen<FolderSizeProgress>("folder-size-progress", ({ payload }) => {
+      if (disposed || payload.jobId !== folderSizeJobIdRef.current) return;
+      setFolderSize((current) => current ? {
+        ...current,
+        totalBytes: payload.totalBytes,
+        scannedFiles: payload.scannedFiles,
+        scannedFolders: payload.scannedFolders,
+      } : current);
+    }).then((unlisten) => {
+      if (disposed) unlisten(); else stopListening = unlisten;
+    });
+    return () => { disposed = true; stopListening?.(); };
+  }, []);
+
+  useEffect(() => {
+    const activeJobId = folderSizeJobIdRef.current;
+    if (activeJobId) void invoke("cancel_folder_size", { jobId: activeJobId }).catch(() => undefined);
+    folderSizeJobIdRef.current = null;
+    setFolderSize(null);
+  }, [selected?.path]);
+
+  useEffect(() => {
+    if (!listing?.path) return;
+    let disposed = false;
+    const checkedPath = listing.path;
+    const check = async () => {
+      if (availabilityCheckRef.current || disposed) return;
+      availabilityCheckRef.current = true;
+      try {
+        const result = await checkDirectoryStatusWithTimeout(checkedPath);
+        if (disposed || listingRef.current?.path.toLocaleLowerCase() !== checkedPath.toLocaleLowerCase()) return;
+        updateAvailabilityRetry(result);
+        const wasUnavailable = unavailableLocationRef.current?.path.toLocaleLowerCase() === checkedPath.toLocaleLowerCase();
+        if (!result.available) {
+          unavailableLocationRef.current = result;
+          setUnavailableLocation(result);
+          markPathAvailability(checkedPath, false);
+          if (!wasUnavailable) setStatus(language === "zh-CN" ? "当前位置暂时不可用，正在等待设备或网络恢复…" : "This location is unavailable. Waiting for the device or network…");
+        } else {
+          markPathAvailability(checkedPath, true);
+          if (!wasUnavailable) return;
+          unavailableLocationRef.current = null;
+          setUnavailableLocation(null);
+          setStatus(language === "zh-CN" ? "位置已恢复，正在同步…" : "Location restored. Syncing…");
+          void refreshDirectory(checkedPath);
+          void invoke<Location[]>("get_locations").then(mergeAvailableLocations).catch(() => undefined);
+        }
+      } catch {
+        // A transient status check failure should not replace the current listing.
+      } finally {
+        availabilityCheckRef.current = false;
+      }
+    };
+    void check();
+    const timer = window.setInterval(() => { void check(); }, 8_000);
+    return () => { disposed = true; window.clearInterval(timer); };
+  }, [listing?.path, language]);
+
+  useEffect(() => {
+    if (!startupComplete) return;
+    let disposed = false;
+    const checkBackgroundTabs = async () => {
+      if (backgroundAvailabilityCheckRef.current || disposed) return;
+      backgroundAvailabilityCheckRef.current = true;
+      try {
+        const activePath = listingRef.current?.path.toLocaleLowerCase();
+        const now = Date.now();
+        const paths = tabsRef.current
+          .map((tab) => tab.path)
+          .filter((path, index, all) => path.toLocaleLowerCase() !== activePath && all.findIndex((candidate) => candidate.toLocaleLowerCase() === path.toLocaleLowerCase()) === index)
+          .filter((path) => (availabilityRetryRef.current.get(path.toLocaleLowerCase())?.nextAt ?? 0) <= now)
+          .slice(0, 20);
+        const results = await Promise.all(paths.map((path) => checkDirectoryStatusWithTimeout(path)));
+        if (disposed) return;
+        let recovered = 0;
+        for (const result of results) {
+          const key = result.path.toLocaleLowerCase();
+          const wasUnavailable = unavailablePathsRef.current.has(key);
+          updateAvailabilityRetry(result);
+          markPathAvailability(result.path, result.available);
+          if (result.available && wasUnavailable) recovered += 1;
+        }
+        if (recovered > 0) {
+          setStatus(language === "zh-CN" ? `${recovered} 个后台位置已恢复连接` : `${recovered} background location(s) reconnected`);
+          void invoke<Location[]>("get_locations").then(mergeAvailableLocations).catch(() => undefined);
+        }
+      } finally {
+        backgroundAvailabilityCheckRef.current = false;
+      }
+    };
+    void checkBackgroundTabs();
+    const timer = window.setInterval(() => { void checkBackgroundTabs(); }, 12_000);
+    return () => { disposed = true; window.clearInterval(timer); };
+  }, [startupComplete, language]);
+
+  useEffect(() => {
+    if (operationExecutorRef.current) return;
+    const next = operationTasks.find((task) => task.status === "queued");
+    if (!next) return;
+    operationExecutorRef.current = next.jobId;
+    setOperationTasks((current) => current.map((task) => task.jobId === next.jobId ? { ...task, status: "running", startedAt: Date.now() } : task));
+    void executeTransfer(next).finally(() => {
+      operationExecutorRef.current = null;
+      window.setTimeout(() => setOperationTasks((current) => [...current]), 0);
+    });
+  }, [operationTasks]);
+
+  useEffect(() => {
+    let disposed = false;
+    let stopListening: (() => void) | undefined;
+    void listen<SearchProgress>("search-progress", ({ payload }) => {
+      if (!disposed && payload.jobId === searchJobIdRef.current) setSearchProgress(payload);
+    }).then((unlisten) => {
+      if (disposed) unlisten(); else stopListening = unlisten;
+    });
+    return () => { disposed = true; stopListening?.(); };
+  }, []);
+
+  function toggleExtensions() {
+    setShowExtensions((current) => {
+      const next = !current;
+      localStorage.setItem(SHOW_EXTENSIONS_KEY, String(next));
+      return next;
+    });
+  }
+
+  function toggleHidden() {
+    if (searchResults !== null || searching) clearDeepSearch();
+    setShowHidden((current) => {
+      const next = !current;
+      localStorage.setItem(SHOW_HIDDEN_KEY, String(next));
+      return next;
+    });
+    setSelected(null);
+    setSelectedPaths(new Set());
+    setSelectionAnchor(null);
+    setScrollTop(0);
+  }
+
+  function toggleEverythingSearch() {
+    setPreferEverything((current) => {
+      const next = !current;
+      localStorage.setItem(SEARCH_EVERYTHING_KEY, String(next));
+      return next;
+    });
+  }
+
+  function toggleToolbarMenu(menu: "new" | "terminal" | "sort" | "view" | "actions") {
+    setContextMenu(null);
+    setTabContextMenu(null);
+    setOpenMenu((current) => current === menu ? null : menu);
+  }
+
+  function toggleActionsMenu(event: ReactMouseEvent<HTMLButtonElement>) {
+    setContextMenu(null);
+    setTabContextMenu(null);
+    if (openMenu === "actions") {
+      setOpenMenu(null);
+      return;
+    }
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const gap = 8;
+    const footerAndMargin = 50;
+    const spaceBelow = Math.max(0, window.innerHeight - bounds.bottom - footerAndMargin - gap);
+    const spaceAbove = Math.max(0, bounds.top - gap);
+    const openUpward = spaceBelow < 230 && spaceAbove > spaceBelow;
+    setActionsMenuStyle({
+      position: "fixed",
+      zIndex: 160,
+      right: Math.max(8, window.innerWidth - bounds.right),
+      top: openUpward ? "auto" : bounds.bottom + gap,
+      bottom: openUpward ? window.innerHeight - bounds.top + gap : "auto",
+      maxHeight: Math.max(72, openUpward ? spaceAbove - gap : spaceBelow),
+    });
+    setOpenMenu("actions");
+  }
+
+  function chooseSort(nextKey: SortKey) {
+    if (nextKey === sortKey) {
+      const nextDirection = sortDirection === "ascending" ? "descending" : "ascending";
+      setSortDirection(nextDirection);
+      localStorage.setItem(SORT_DIRECTION_KEY, nextDirection);
+    } else {
+      setSortKey(nextKey);
+      setSortDirection("ascending");
+      localStorage.setItem(SORT_KEY, nextKey);
+      localStorage.setItem(SORT_DIRECTION_KEY, "ascending");
+    }
+    setScrollTop(0);
+    setOpenMenu(null);
+  }
+
+  function beginColumnResize(column: ResizableColumn, event: ReactPointerEvent<HTMLSpanElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    const startX = event.clientX;
+    const startWidth = columnWidths[column];
+    const limits: Record<ResizableColumn, [number, number]> = { modified: [110, 320], type: [90, 260], size: [70, 180] };
+    const move = (pointerEvent: PointerEvent) => {
+      const [minimum, maximum] = limits[column];
+      const width = Math.max(minimum, Math.min(maximum, startWidth + startX - pointerEvent.clientX));
+      setColumnWidths((current) => ({ ...current, [column]: width }));
+    };
+    const finish = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", finish);
+      setColumnWidths((current) => { localStorage.setItem(COLUMN_WIDTHS_KEY, JSON.stringify(current)); return current; });
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", finish, { once: true });
+  }
+
+  function resetColumnWidth(column: ResizableColumn, event: ReactMouseEvent<HTMLSpanElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    setColumnWidths((current) => {
+      const next = { ...current, [column]: DEFAULT_COLUMN_WIDTHS[column] };
+      localStorage.setItem(COLUMN_WIDTHS_KEY, JSON.stringify(next));
+      return next;
+    });
+  }
+
+  function chooseView(nextMode: ViewMode) {
+    setViewMode(nextMode);
+    localStorage.setItem(VIEW_MODE_KEY, nextMode);
+    setScrollTop(0);
+    setTabs((current) => current.map((tab) => tab.id === activeTabId ? { ...tab, viewMode: nextMode, scrollTop: 0 } : tab));
+    if (fileListRef.current) fileListRef.current.scrollTop = 0;
+    setOpenMenu(null);
+  }
+
+  function togglePreviewPane() {
+    setPreviewPaneOpen((current) => {
+      const next = !current;
+      localStorage.setItem(PREVIEW_PANE_KEY, String(next));
+      return next;
+    });
+    setOpenMenu(null);
+  }
+
+  function chooseLanguage(nextLanguage: UiLanguage) {
+    setLanguage(nextLanguage);
+    localStorage.setItem(LANGUAGE_KEY, nextLanguage);
+  }
+
+  function chooseClaudeProvider(provider: ClaudeProvider) {
+    setClaudeProvider(provider);
+    localStorage.setItem(CLAUDE_PROVIDER_KEY, provider);
+    setClaudeCredentialError(null);
+    setClaudeDiagnostic(null);
+  }
+
+  function toggleClaudeFullAccess() {
+    setClaudeFullAccess((current) => {
+      const next = !current;
+      localStorage.setItem(CLAUDE_FULL_ACCESS_KEY, String(next));
+      return next;
+    });
+  }
+
+  async function saveClaudeApiKey() {
+    if (!claudeApiKeyDraft.trim()) return;
+    setClaudeCredentialBusy(true);
+    setClaudeCredentialError(null);
+    try {
+      const next = await invoke<ClaudeCredentialStatus>("save_claude_api_key", { apiKey: claudeApiKeyDraft });
+      setClaudeCredential(next);
+      setClaudeApiKeyDraft("");
+      setClaudeDiagnostic(null);
+      chooseClaudeProvider("deepseek");
+      setStatus(language === "zh-CN" ? "DeepSeek 密钥已安全保存；以后启动 Claude Code 会自动使用。" : "DeepSeek key saved securely. Claude Code will use it automatically.");
+    } catch (error) {
+      setClaudeCredentialError(String(error));
+    } finally {
+      setClaudeCredentialBusy(false);
+    }
+  }
+
+  async function removeClaudeApiKey() {
+    setClaudeCredentialBusy(true);
+    setClaudeCredentialError(null);
+    try {
+      setClaudeCredential(await invoke<ClaudeCredentialStatus>("delete_claude_api_key"));
+      setClaudeApiKeyDraft("");
+      setClaudeDiagnostic(null);
+    } catch (error) {
+      setClaudeCredentialError(String(error));
+    } finally {
+      setClaudeCredentialBusy(false);
+    }
+  }
+
+  async function runClaudeDiagnostic() {
+    setClaudeDiagnosticBusy(true);
+    setClaudeCredentialError(null);
+    try {
+      setClaudeDiagnostic(await invoke<ClaudeDiagnostic>("diagnose_claude", { provider: claudeProvider }));
+    } catch (error) {
+      setClaudeCredentialError(String(error));
+    } finally {
+      setClaudeDiagnosticBusy(false);
+    }
+  }
+
+  function claudeDiagnosticLabel(diagnostic: ClaudeDiagnostic) {
+    if (language === "en") {
+      return ({ ready: "Claude Code and the selected API are ready.", claudeMissing: "Claude Code was not found on this computer.", missingKey: "No DeepSeek API credential was found.", networkError: "The API endpoint could not be reached.", authError: "The API rejected this credential.", serviceError: "The API returned a service error.", notAuthenticated: "Claude Code is not signed in to Anthropic." } as Record<ClaudeDiagnostic["status"], string>)[diagnostic.status];
+    }
+    return ({ ready: "Claude Code 与所选 API 均可正常使用。", claudeMissing: "这台电脑上没有找到 Claude Code。", missingKey: "没有找到 DeepSeek API 凭据。", networkError: "无法连接 API 地址，请检查网络或代理。", authError: "API 拒绝了当前密钥，请检查密钥是否有效。", serviceError: "API 服务返回异常状态。", notAuthenticated: "Claude Code 尚未登录 Anthropic。" } as Record<ClaudeDiagnostic["status"], string>)[diagnostic.status];
+  }
+
+  function clearDeepSearch() {
+    const activeJob = searchJobIdRef.current;
+    if (activeJob) void invoke("cancel_search", { jobId: activeJob });
+    searchJobIdRef.current = null;
+    setSearching(false);
+    setSearchResults(null);
+    setSearchProgress(null);
+    setSearchResultMeta(null);
+    setSelected(null);
+    setSelectedPaths(new Set());
+    setSelectionAnchor(null);
+    setScrollTop(0);
+  }
+
+  function changeSearchQuery(value: string) {
+    if (searchResults !== null || searching) clearDeepSearch();
+    setQuery(value);
+  }
+
+  function currentSearchProfile(): SearchProfile {
+    return { query: query.trim(), kind: searchKind, date: searchDate, size: searchSize };
+  }
+
+  function searchProfilesMatch(first: SearchProfile, second: SearchProfile) {
+    return first.query.toLocaleLowerCase() === second.query.toLocaleLowerCase() && first.kind === second.kind && first.date === second.date && first.size === second.size;
+  }
+
+  function searchProfileLabel(profile: SearchProfile) {
+    const parts: string[] = [];
+    if (profile.query) parts.push(`“${profile.query}”`);
+    const kindLabels: Record<SearchKind, string> = { all: text.anyType, folders: text.foldersOnly, images: text.images, documents: text.documents, videos: text.videos, audio: text.audio, archives: text.archives };
+    const dateLabels: Record<SearchDate, string> = { any: text.anyDate, day: text.pastDay, week: text.pastWeek, month: text.pastMonth, year: text.pastYear };
+    const sizeLabels: Record<SearchSize, string> = { any: text.anySize, small: text.smallFiles, medium: text.mediumFiles, large: text.largeFiles };
+    if (profile.kind !== "all") parts.push(kindLabels[profile.kind]);
+    if (profile.date !== "any") parts.push(dateLabels[profile.date]);
+    if (profile.size !== "any") parts.push(sizeLabels[profile.size]);
+    return parts.join(" · ") || text.searchFilters;
+  }
+
+  function rememberSearch(profile: SearchProfile) {
+    const item: SearchHistoryItem = { ...profile, usedAt: Date.now() };
+    setSearchHistory((current) => {
+      const next = [item, ...current.filter((candidate) => !searchProfilesMatch(candidate, profile))].slice(0, 12);
+      localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(next));
+      return next;
+    });
+  }
+
+  function saveCurrentSearch() {
+    const profile = currentSearchProfile();
+    if (!profile.query && profile.kind === "all" && profile.date === "any" && profile.size === "any") return;
+    setSavedSearches((current) => {
+      const existing = current.find((candidate) => searchProfilesMatch(candidate, profile));
+      const item: SavedSearch = existing ? { ...existing, ...profile } : { ...profile, id: crypto.randomUUID(), name: searchProfileLabel(profile) };
+      const next = [item, ...current.filter((candidate) => candidate.id !== item.id)].slice(0, 20);
+      localStorage.setItem(SAVED_SEARCHES_KEY, JSON.stringify(next));
+      return next;
+    });
+  }
+
+  function removeSavedSearch(id: string) {
+    setSavedSearches((current) => {
+      const next = current.filter((item) => item.id !== id);
+      localStorage.setItem(SAVED_SEARCHES_KEY, JSON.stringify(next));
+      return next;
+    });
+  }
+
+  function clearSearchHistory() {
+    setSearchHistory([]);
+    localStorage.removeItem(SEARCH_HISTORY_KEY);
+  }
+
+  async function startDeepSearch(profile: SearchProfile = currentSearchProfile()) {
+    if (!listing || searching) return;
+    if (!profile.query && profile.kind === "all" && profile.date === "any" && profile.size === "any") {
+      setStatus(language === "zh-CN" ? "请输入名称，或至少选择一个筛选条件" : "Enter a name or choose at least one filter.");
+      return;
+    }
+    setQuery(profile.query);
+    setSearchKind(profile.kind);
+    setSearchDate(profile.date);
+    setSearchSize(profile.size);
+    rememberSearch(profile);
+    const day = 24 * 60 * 60;
+    const age = profile.date === "day" ? day : profile.date === "week" ? 7 * day : profile.date === "month" ? 30 * day : profile.date === "year" ? 365 * day : 0;
+    const modifiedAfter = age ? Math.floor(Date.now() / 1000) - age : null;
+    const megabyte = 1024 * 1024;
+    const minSize = profile.size === "medium" ? megabyte : profile.size === "large" ? 100 * megabyte : null;
+    const maxSize = profile.size === "small" ? megabyte - 1 : profile.size === "medium" ? 100 * megabyte : null;
+    const jobId = crypto.randomUUID();
+    searchJobIdRef.current = jobId;
+    setSearching(true);
+    setSearchPanelOpen(false);
+    setSearchResults([]);
+    setSearchResultMeta(null);
+    setSearchProgress({ jobId, scanned: 0, matches: 0, currentPath: listing.path });
+    setSelected(null);
+    setSelectedPaths(new Set());
+    setSelectionAnchor(null);
+    setScrollTop(0);
+    try {
+      const result = await invoke<SearchResult>("search_directory", {
+        request: { jobId, root: listing.path, query: profile.query, kind: profile.kind, modifiedAfter, minSize, maxSize, includeHidden: showHidden, preferEverything },
+      });
+      if (searchJobIdRef.current !== jobId) return;
+      setSearchResults(result.entries);
+      setSearchResultMeta({ scanned: result.scanned, cancelled: result.cancelled, truncated: result.truncated, provider: result.provider });
+      const suffix = result.truncated ? (language === "zh-CN" ? "（已达到 20,000 条上限）" : " (20,000-result limit reached)") : result.cancelled ? (language === "zh-CN" ? "（已取消）" : " (cancelled)") : "";
+      const source = result.provider === "everything" ? (language === "zh-CN" ? "Everything 索引" : "Everything index") : (language === "zh-CN" ? "本地扫描" : "local scan");
+      setStatus(language === "zh-CN" ? `${source}：检查 ${result.scanned} 项，找到 ${result.entries.length} 项${suffix}` : `${source}: checked ${result.scanned} items; found ${result.entries.length}${suffix}.`);
+    } catch (error) {
+      if (searchJobIdRef.current === jobId) {
+        setSearchResults(null);
+        setStatus(language === "zh-CN" ? `搜索失败：${String(error)}` : `Search failed: ${String(error)}`);
+      }
+    } finally {
+      if (searchJobIdRef.current === jobId) {
+        searchJobIdRef.current = null;
+        setSearching(false);
+      }
+    }
+  }
+
+  function cancelDeepSearch() {
+    const jobId = searchJobIdRef.current;
+    if (jobId) void invoke("cancel_search", { jobId });
+  }
+
+  function toggleFavoriteCurrent() {
+    if (!listing) return;
+    setFavorites((current) => {
+      const alreadySaved = current.some((favorite) => favorite.path.toLocaleLowerCase() === listing.path.toLocaleLowerCase());
+      const next = alreadySaved ? current.filter((favorite) => favorite.path.toLocaleLowerCase() !== listing.path.toLocaleLowerCase()) : [...current, { path: listing.path, label: null, group: null }];
+      localStorage.setItem(FAVORITES_KEY, JSON.stringify(next));
+      return next;
+    });
+    setStatus(currentIsFavorite ? (language === "zh-CN" ? "已取消收藏" : "Removed from Favorites.") : (language === "zh-CN" ? "已收藏当前文件夹" : "Added the current folder to Favorites."));
+  }
+
+  function removeFavorite(path: string, event: ReactMouseEvent) {
+    event.stopPropagation();
+    setFavorites((current) => {
+      const next = current.filter((favorite) => favorite.path.toLocaleLowerCase() !== path.toLocaleLowerCase());
+      localStorage.setItem(FAVORITES_KEY, JSON.stringify(next));
+      return next;
+    });
+  }
+
+  function beginFavoriteRename(favorite: FavoriteItem, event: ReactMouseEvent) {
+    event.stopPropagation();
+    setFavoriteEditingPath(favorite.path);
+    setFavoriteLabelValue(favorite.label ?? labelForPath(favorite.path));
+    setFavoriteGroupValue(favorite.group ?? "");
+  }
+
+  function commitFavoriteRename(path: string, value: string, groupValue: string) {
+    const cleanLabel = value.trim();
+    const cleanGroup = groupValue.trim();
+    setFavorites((current) => {
+      const next = current.map((favorite) => favorite.path.toLocaleLowerCase() === path.toLocaleLowerCase()
+        ? { ...favorite, label: cleanLabel && cleanLabel !== labelForPath(path) ? cleanLabel : null, group: cleanGroup || null }
+        : favorite);
+      localStorage.setItem(FAVORITES_KEY, JSON.stringify(next));
+      return next;
+    });
+    setFavoriteEditingPath(null);
+  }
+
+  function reorderFavorite(sourcePath: string, targetPath: string) {
+    if (sourcePath.toLocaleLowerCase() === targetPath.toLocaleLowerCase()) return;
+    setFavorites((current) => {
+      const sourceIndex = current.findIndex((favorite) => favorite.path.toLocaleLowerCase() === sourcePath.toLocaleLowerCase());
+      const targetIndex = current.findIndex((favorite) => favorite.path.toLocaleLowerCase() === targetPath.toLocaleLowerCase());
+      if (sourceIndex < 0 || targetIndex < 0) return current;
+      const next = [...current];
+      const [moved] = next.splice(sourceIndex, 1);
+      const movedWithGroup = { ...moved, group: current[targetIndex].group };
+      next.splice(sourceIndex < targetIndex ? targetIndex - 1 : targetIndex, 0, movedWithGroup);
+      localStorage.setItem(FAVORITES_KEY, JSON.stringify(next));
+      return next;
+    });
+  }
+
+  function toggleFavoriteGroup(group: string) {
+    const key = group.toLocaleLowerCase();
+    setCollapsedFavoriteGroups((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      localStorage.setItem(FAVORITE_COLLAPSE_KEY, JSON.stringify([...next]));
+      return next;
+    });
+  }
+
+  async function toggleTreePath(path: string) {
+    const key = path.toLocaleLowerCase();
+    if (expandedTreePaths.has(key)) {
+      setExpandedTreePaths((current) => { const next = new Set(current); next.delete(key); return next; });
+      return;
+    }
+    setExpandedTreePaths((current) => new Set([...current, key]));
+    if (treeChildren[key]) return;
+    setTreeLoadingPaths((current) => new Set([...current, key]));
+    try {
+      const result = await invoke<DirectoryListing>("list_directory", { path });
+      setTreeChildren((current) => ({ ...current, [key]: result.entries.filter((entry) => entry.isDirectory) }));
+    } catch (error) {
+      setExpandedTreePaths((current) => { const next = new Set(current); next.delete(key); return next; });
+      setStatus(language === "zh-CN" ? `无法展开文件夹：${String(error)}` : `Could not expand folder: ${String(error)}`);
+    } finally {
+      setTreeLoadingPaths((current) => { const next = new Set(current); next.delete(key); return next; });
+    }
+  }
+
+  function renderTreeNode(path: string, label: string, depth = 0): React.ReactNode {
+    const key = path.toLocaleLowerCase();
+    const expanded = expandedTreePaths.has(key);
+    const loading = treeLoadingPaths.has(key);
+    const children = (treeChildren[key] ?? []).filter((entry) => showHidden || !entry.isHidden);
+    const selectedTreeNode = listing?.path.toLocaleLowerCase() === key;
+    return <div className="tree-node" key={path}>
+      <div className={`tree-node-row ${selectedTreeNode ? "selected" : ""} ${dragTarget === path ? "drop-target" : ""}`} data-drop-path={path} style={{ paddingLeft: 5 + depth * 14 }}>
+        <button className={`tree-toggle ${expanded ? "expanded" : ""}`} aria-label={expanded ? "Collapse" : "Expand"} onClick={() => void toggleTreePath(path)}>{loading ? "…" : "›"}</button>
+        <button className="tree-label" title={path} onClick={() => void browse(path)}><FolderGlyph /><span>{label}</span></button>
+      </div>
+      {expanded && <div className="tree-children">{children.length ? children.map((entry) => renderTreeNode(entry.path, entry.name, depth + 1)) : !loading && <span className="tree-empty" style={{ paddingLeft: 35 + depth * 14 }}>—</span>}</div>}
+    </div>;
+  }
+
+  function selectEntry(entry: FileEntry, index: number, event: ReactMouseEvent) {
+    if (event.shiftKey && selectionAnchor !== null) {
+      const start = Math.min(selectionAnchor, index);
+      const end = Math.max(selectionAnchor, index);
+      const range = sortedEntries.slice(start, end + 1).map((item) => item.path);
+      setSelectedPaths(new Set(event.ctrlKey ? [...selectedPaths, ...range] : range));
+      setSelected(entry);
+      return;
+    }
+    if (event.ctrlKey) {
+      const next = new Set(selectedPaths);
+      if (next.has(entry.path)) next.delete(entry.path); else next.add(entry.path);
+      setSelectedPaths(next);
+      setSelected(next.has(entry.path) ? entry : (listing?.entries.find((item) => next.has(item.path)) ?? null));
+      setSelectionAnchor(index);
+      return;
+    }
+    setSelectedPaths(new Set([entry.path]));
+    setSelected(entry);
+    setSelectionAnchor(index);
+  }
+
+  function clientPositionInList(clientX: number, clientY: number) {
+    const list = fileListRef.current;
+    if (!list) return null;
+    const rect = list.getBoundingClientRect();
+    return {
+      x: Math.max(0, Math.min(list.scrollWidth, clientX - rect.left + list.scrollLeft)),
+      y: Math.max(0, Math.min(list.scrollHeight, clientY - rect.top + list.scrollTop)),
+    };
+  }
+
+  function applyMarqueeSelection(box: SelectionBox, initialPaths: Set<string>) {
+    const left = Math.min(box.startX, box.currentX);
+    const right = Math.max(box.startX, box.currentX);
+    const top = Math.min(box.startY, box.currentY);
+    const bottom = Math.max(box.startY, box.currentY);
+    const matchedIndices: number[] = [];
+    if (viewMode === "grid") {
+      const horizontalPadding = 8;
+      const gap = 8;
+      const cellWidth = Math.max(1, (listViewportWidth - horizontalPadding * 2 - gap * (gridColumns - 1)) / gridColumns);
+      const firstRow = Math.max(0, Math.floor(top / rowHeight));
+      const lastRow = Math.min(Math.ceil(sortedEntries.length / gridColumns) - 1, Math.floor(bottom / rowHeight));
+      for (let row = firstRow; row <= lastRow; row += 1) {
+        for (let column = 0; column < gridColumns; column += 1) {
+          const index = row * gridColumns + column;
+          if (index >= sortedEntries.length) break;
+          const itemLeft = horizontalPadding + column * (cellWidth + gap);
+          const itemRight = itemLeft + cellWidth;
+          const itemTop = row * rowHeight + horizontalPadding;
+          const itemBottom = itemTop + 134;
+          if (right >= itemLeft && left <= itemRight && bottom >= itemTop && top <= itemBottom) matchedIndices.push(index);
+        }
+      }
+    } else {
+      const firstIndex = Math.max(0, Math.floor(top / rowHeight));
+      const lastIndex = Math.min(sortedEntries.length - 1, Math.floor(bottom / rowHeight));
+      if (right >= 0 && left <= listViewportWidth) {
+        for (let index = firstIndex; index <= lastIndex; index += 1) matchedIndices.push(index);
+      }
+    }
+    const nextPaths = new Set(initialPaths);
+    for (const index of matchedIndices) nextPaths.add(sortedEntries[index].path);
+    setSelectedPaths(nextPaths);
+    const primaryIndex = matchedIndices.length ? matchedIndices[matchedIndices.length - 1] : sortedEntries.findIndex((entry) => nextPaths.has(entry.path));
+    setSelected(primaryIndex >= 0 ? sortedEntries[primaryIndex] : null);
+    setSelectionAnchor(matchedIndices[0] ?? (primaryIndex >= 0 ? primaryIndex : null));
+  }
+
+  function beginMarqueeSelection(event: ReactPointerEvent<HTMLDivElement>) {
+    if (event.button !== 0 || renamingPath || (event.target instanceof Element && event.target.closest(".file-row"))) return;
+    const point = clientPositionInList(event.clientX, event.clientY);
+    if (!point) return;
+    const initialPaths = event.ctrlKey ? new Set(selectedPaths) : new Set<string>();
+    const box = { startX: point.x, startY: point.y, currentX: point.x, currentY: point.y };
+    marqueeRef.current = { ...box, pointerId: event.pointerId, initialPaths, clientX: event.clientX, clientY: event.clientY, animationFrame: null };
+    setSelectionBox(box);
+    if (!event.ctrlKey) {
+      setSelected(null);
+      setSelectedPaths(new Set());
+      setSelectionAnchor(null);
+    }
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const autoScroll = () => {
+      const marquee = marqueeRef.current;
+      const list = fileListRef.current;
+      if (!marquee || !list) return;
+      const rect = list.getBoundingClientRect();
+      const edge = 30;
+      let delta = 0;
+      if (marquee.clientY < rect.top + edge) delta = -Math.max(2, Math.ceil((rect.top + edge - marquee.clientY) / 3));
+      else if (marquee.clientY > rect.bottom - edge) delta = Math.max(2, Math.ceil((marquee.clientY - (rect.bottom - edge)) / 3));
+      if (delta !== 0) {
+        const previousTop = list.scrollTop;
+        list.scrollTop = Math.max(0, Math.min(list.scrollHeight - list.clientHeight, list.scrollTop + delta));
+        if (list.scrollTop !== previousTop) {
+          const nextPoint = clientPositionInList(marquee.clientX, marquee.clientY);
+          if (nextPoint) {
+            const nextBox = { startX: marquee.startX, startY: marquee.startY, currentX: nextPoint.x, currentY: nextPoint.y };
+            marqueeRef.current = { ...marquee, ...nextBox };
+            setSelectionBox(nextBox);
+            applyMarqueeSelection(nextBox, marquee.initialPaths);
+          }
+        }
+      }
+      const current = marqueeRef.current;
+      if (current) current.animationFrame = window.requestAnimationFrame(autoScroll);
+    };
+    marqueeRef.current.animationFrame = window.requestAnimationFrame(autoScroll);
+    event.preventDefault();
+  }
+
+  function updateMarqueeSelection(event: ReactPointerEvent<HTMLDivElement>) {
+    const marquee = marqueeRef.current;
+    if (!marquee || marquee.pointerId !== event.pointerId) return;
+    const point = clientPositionInList(event.clientX, event.clientY);
+    if (!point) return;
+    const box = { startX: marquee.startX, startY: marquee.startY, currentX: point.x, currentY: point.y };
+    marqueeRef.current = { ...marquee, ...box, clientX: event.clientX, clientY: event.clientY };
+    setSelectionBox(box);
+    applyMarqueeSelection(box, marquee.initialPaths);
+    event.preventDefault();
+  }
+
+  function finishMarqueeSelection(event: ReactPointerEvent<HTMLDivElement>) {
+    const marquee = marqueeRef.current;
+    if (!marquee || marquee.pointerId !== event.pointerId) return;
+    if (marquee.animationFrame !== null) window.cancelAnimationFrame(marquee.animationFrame);
+    marqueeRef.current = null;
+    setSelectionBox(null);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    event.preventDefault();
+  }
+
+  function openEntryContextMenu(entry: FileEntry, index: number, event: ReactMouseEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    if (!selectedPaths.has(entry.path)) {
+      setSelectedPaths(new Set([entry.path]));
+      setSelected(entry);
+      setSelectionAnchor(index);
+    }
+    setOpenMenu(null);
+    setTabContextMenu(null);
+    setContextMenu({ x: Math.max(8, Math.min(event.clientX, window.innerWidth - 230)), y: Math.max(8, Math.min(event.clientY, window.innerHeight - 570)), kind: "entry" });
+  }
+
+  function openBackgroundContextMenu(event: ReactMouseEvent<HTMLDivElement>) {
+    if (event.target instanceof Element && event.target.closest(".file-row")) return;
+    event.preventDefault();
+    setSelected(null);
+    setSelectedPaths(new Set());
+    setSelectionAnchor(null);
+    setOpenMenu(null);
+    setTabContextMenu(null);
+    setContextMenu({ x: Math.max(8, Math.min(event.clientX, window.innerWidth - 230)), y: Math.max(8, Math.min(event.clientY, window.innerHeight - 310)), kind: "background" });
+  }
+
+  function selectAll() {
+    setSelectedPaths(new Set(sortedEntries.map((entry) => entry.path)));
+    setSelected(sortedEntries[0] ?? null);
+    setSelectionAnchor(sortedEntries.length ? 0 : null);
+  }
+
+  function selectByKeyboard(offset: number | "start" | "end", extend = false) {
+    if (sortedEntries.length === 0) return;
+    const currentIndex = selected ? sortedEntries.findIndex((entry) => entry.path === selected.path) : -1;
+    const nextIndex = offset === "start" ? 0 : offset === "end" ? sortedEntries.length - 1 : Math.max(0, Math.min(sortedEntries.length - 1, (currentIndex < 0 ? (offset > 0 ? -1 : 0) : currentIndex) + offset));
+    const entry = sortedEntries[nextIndex];
+    setSelected(entry);
+    if (extend) {
+      const anchor = selectionAnchor ?? (currentIndex >= 0 ? currentIndex : nextIndex);
+      const start = Math.min(anchor, nextIndex);
+      const end = Math.max(anchor, nextIndex);
+      setSelectedPaths(new Set(sortedEntries.slice(start, end + 1).map((item) => item.path)));
+      if (selectionAnchor === null) setSelectionAnchor(anchor);
+    } else {
+      setSelectedPaths(new Set([entry.path]));
+      setSelectionAnchor(nextIndex);
+    }
+    const targetRow = Math.floor(nextIndex / gridColumns);
+    const targetTop = targetRow * rowHeight;
+    const list = fileListRef.current;
+    if (list && targetTop < list.scrollTop) list.scrollTop = targetTop;
+    else if (list && targetTop + rowHeight > list.scrollTop + list.clientHeight) list.scrollTop = targetTop + rowHeight - list.clientHeight;
+  }
+
+  function toggleFocusedSelection() {
+    if (!selected) return;
+    const next = new Set(selectedPaths);
+    if (next.has(selected.path)) next.delete(selected.path); else next.add(selected.path);
+    setSelectedPaths(next);
+    const index = sortedEntries.findIndex((entry) => entry.path === selected.path);
+    if (index >= 0) setSelectionAnchor(index);
+  }
+
+  async function copySelection(mode: "copy" | "move") {
+    if (selectedPaths.size === 0) return;
+    const nextClipboard = { mode, paths: [...selectedPaths] } as ClipboardState;
+    try {
+      await invoke("set_file_clipboard", nextClipboard);
+      setClipboard(nextClipboard);
+      setOpenMenu(null);
+      setStatus(language === "zh-CN" ? `${selectedPaths.size} 个项目已${mode === "copy" ? "复制到系统剪贴板" : "剪切"}` : `${selectedPaths.size} item(s) ${mode === "copy" ? "copied to the Windows clipboard" : "cut"}.`);
+    } catch (error) { setStatus(language === "zh-CN" ? `无法访问系统剪贴板：${String(error)}` : `Could not access the Windows clipboard: ${String(error)}`); }
+  }
+
+  async function copySelectionText(mode: "path" | "name") {
+    if (selectedPaths.size === 0) return;
+    const values = mode === "path" ? [...selectedPaths] : selectedEntries.map((entry) => entry.name);
+    try {
+      await invoke("set_text_clipboard", { text: values.join("\r\n") });
+      setOpenMenu(null);
+      setContextMenu(null);
+      setStatus(language === "zh-CN" ? `已复制 ${values.length} 个项目的${mode === "path" ? "路径" : "名称"}` : `Copied ${values.length} item ${mode === "path" ? "path(s)" : "name(s)"}.`);
+    } catch (error) {
+      setStatus(language === "zh-CN" ? `无法复制文本：${String(error)}` : `Could not copy text: ${String(error)}`);
+    }
+  }
+
+  async function prepareTransfer(sourceClipboard: ClipboardState, destination: string) {
+    try {
+      const conflicts = await invoke<ConflictEntry[]>("find_conflicts", { sources: sourceClipboard.paths, destination });
+      if (conflicts.length > 0) {
+        setApplyConflictToRemaining(conflicts.length > 1);
+        setPendingTransfer({ clipboard: sourceClipboard, destination, conflicts, currentIndex: 0, resolutions: [] });
+      } else {
+        await startTransfer(sourceClipboard, destination, "skip", []);
+      }
+    } catch (error) {
+      setStatus(String(error));
+    }
+  }
+
+  function resolveCurrentConflict(action: ConflictChoice) {
+    const pending = pendingTransfer;
+    if (!pending) return;
+    const remaining = pending.conflicts.slice(pending.currentIndex);
+    const additions = (applyConflictToRemaining ? remaining : remaining.slice(0, 1)).map((entry) => ({ source: entry.source.path, action }));
+    const resolutions = [...pending.resolutions, ...additions];
+    const nextIndex = pending.currentIndex + additions.length;
+    if (nextIndex < pending.conflicts.length) {
+      setPendingTransfer({ ...pending, currentIndex: nextIndex, resolutions });
+      return;
+    }
+    void startTransfer(pending.clipboard, pending.destination, "skip", resolutions);
+  }
+
+  async function startTransfer(sourceClipboard: ClipboardState, destination: string, conflict: ConflictChoice, conflictResolutions: ConflictResolution[] = []) {
+    const jobId = crypto.randomUUID();
+    setPendingTransfer(null);
+    setOpenMenu(null);
+    setRetryTransfer(null);
+    const now = Date.now();
+    const task: TransferTask = {
+      jobId, mode: sourceClipboard.mode, sourcePaths: sourceClipboard.paths, destination, conflict, conflictResolutions,
+      status: "queued", queuedAt: now, startedAt: now, finishedAt: null, paused: false,
+      processedBytes: 0, totalBytes: 0, completedItems: 0, totalItems: sourceClipboard.paths.length,
+      currentName: "", phase: "scanning", scannedItems: 0, scannedBytes: 0, speed: 0, issues: [], error: null,
+    };
+    setOperationTasks((current) => [...current.slice(-19), task]);
+    setStatus(language === "zh-CN" ? `已加入文件任务：${sourceClipboard.paths.length} 项` : `Added ${sourceClipboard.paths.length} item(s) to the file queue.`);
+  }
+
+  function retryableTaskPaths(task: TransferTask) {
+    const issuePaths = task.issues.map((issue) => issue.path);
+    const candidates = issuePaths.length ? issuePaths : task.status === "failed" && task.error ? task.sourcePaths : [];
+    return candidates.filter((path, index, all) => all.findIndex((candidate) => candidate.toLocaleLowerCase() === path.toLocaleLowerCase()) === index);
+  }
+
+  function retryTaskFailures(task: TransferTask) {
+    const paths = retryableTaskPaths(task);
+    if (!paths.length) return;
+    void startTransfer({ mode: task.mode, paths }, task.destination, task.conflict, task.conflictResolutions);
+  }
+
+  async function retrySingleTransferIssue(issue: OperationIssue) {
+    const retry = retryTransfer;
+    if (!retry || !retry.clipboard.paths.some((path) => path.toLocaleLowerCase() === issue.path.toLocaleLowerCase())) return;
+    const remainingPaths = retry.clipboard.paths.filter((path) => path.toLocaleLowerCase() !== issue.path.toLocaleLowerCase());
+    setOperationIssues((current) => current.filter((item) => item.path.toLocaleLowerCase() !== issue.path.toLocaleLowerCase()));
+    await startTransfer({ mode: retry.clipboard.mode, paths: [issue.path] }, retry.destination, retry.conflict, retry.conflictResolutions);
+    setRetryTransfer(remainingPaths.length ? { ...retry, clipboard: { ...retry.clipboard, paths: remainingPaths } } : null);
+  }
+
+  function pushUndo(action: UndoAction, label: string) {
+    const now = Date.now();
+    const record: UndoRecord = { id: crypto.randomUUID(), action, label, createdAt: now };
+    setUndoStack((current) => [...current.filter((item) => now - item.createdAt <= UNDO_RETENTION_MS), record].slice(-MAX_UNDO_STEPS));
+  }
+
+  async function executeTransfer(task: TransferTask) {
+    const startedAt = Date.now();
+    setOperationIssues([]);
+    setOperation({
+      jobId: task.jobId, mode: task.mode, startedAt, paused: false, speed: 0,
+      processedBytes: task.processedBytes, totalBytes: task.totalBytes,
+      completedItems: task.completedItems, totalItems: task.totalItems, currentName: task.currentName,
+      phase: task.phase, scannedItems: task.scannedItems, scannedBytes: task.scannedBytes,
+    });
+    try {
+      const result = await invoke<FileOperationResult>("run_file_operation", {
+        request: { jobId: task.jobId, sources: task.sourcePaths, destination: task.destination, mode: task.mode, conflict: task.conflict, conflictResolutions: task.conflictResolutions },
+      });
+      if (result.undo) pushUndo(result.undo, language === "zh-CN" ? `${task.mode === "copy" ? "复制" : "移动"} ${result.completed} 项` : `${task.mode === "copy" ? "Copy" : "Move"} ${result.completed} item(s)`);
+      if (result.issues.length) {
+        setOperationIssues(result.issues);
+        const failedClipboard = { mode: task.mode, paths: result.issues.map((issue) => issue.path) } as ClipboardState;
+        setRetryTransfer({ clipboard: failedClipboard, destination: task.destination, conflict: task.conflict, conflictResolutions: task.conflictResolutions });
+        if (task.mode === "move") {
+          setClipboard(failedClipboard);
+          void invoke("set_file_clipboard", failedClipboard);
+        }
+      } else {
+        setRetryTransfer(null);
+        if (task.mode === "move" && result.completed > 0) setClipboard(null);
+      }
+      const finalStatus = result.issues.length
+        ? (language === "zh-CN" ? `已完成 ${result.completed} 项，${result.issues.length} 项需要处理` : `Completed ${result.completed} item(s); ${result.issues.length} need attention.`)
+        : result.error
+        ? result.error
+        : result.cancelled
+          ? (language === "zh-CN" ? `操作已取消，已完成 ${result.completed} 项` : `Operation cancelled after ${result.completed} item(s).`)
+          : (language === "zh-CN" ? `已完成 ${result.completed} 项${result.skipped ? `，跳过 ${result.skipped} 项` : ""}` : `Completed ${result.completed} item(s)${result.skipped ? `; skipped ${result.skipped}` : ""}.`);
+      setOperationTasks((current) => current.map((item) => item.jobId === task.jobId ? {
+        ...item,
+        status: result.cancelled ? "cancelled" : result.error || (result.issues.length > 0 && result.completed === 0) ? "failed" : "completed",
+        finishedAt: Date.now(), issues: result.issues, error: result.error,
+      } : item));
+      if (listing) await browse(listing.path, activeTabId, false);
+      setStatus(finalStatus);
+    } catch (error) {
+      setStatus(language === "zh-CN" ? `文件操作失败：${String(error)}` : `File operation failed: ${String(error)}`);
+      setOperationTasks((current) => current.map((item) => item.jobId === task.jobId ? { ...item, status: "failed", finishedAt: Date.now(), error: String(error) } : item));
+    } finally {
+      setOperation(null);
+    }
+  }
+
+  async function pasteIntoCurrent() {
+    if (!listing) return;
+    try {
+      const systemClipboard = await invoke<ClipboardPayload>("get_file_clipboard");
+      const source = systemClipboard.paths.length ? systemClipboard : clipboard;
+      if (source?.paths.length) await prepareTransfer(source, listing.path);
+      else setStatus(language === "zh-CN" ? "系统剪贴板中没有可粘贴的文件" : "The Windows clipboard does not contain files.");
+    } catch (error) { setStatus(language === "zh-CN" ? `无法读取系统剪贴板：${String(error)}` : `Could not read the Windows clipboard: ${String(error)}`); }
+  }
+
+  function cancelOperation() {
+    if (operation) void invoke("cancel_file_operation", { jobId: operation.jobId });
+  }
+
+  function cancelTask(task: TransferTask) {
+    if (task.status === "queued") {
+      setOperationTasks((current) => current.map((item) => item.jobId === task.jobId ? { ...item, status: "cancelled", finishedAt: Date.now() } : item));
+    } else if (task.status === "running" || task.status === "paused") {
+      void invoke("cancel_file_operation", { jobId: task.jobId });
+    }
+  }
+
+  async function toggleOperationPaused() {
+    if (!operation) return;
+    const paused = !operation.paused;
+    await invoke("set_file_operation_paused", { jobId: operation.jobId, paused });
+    setOperation((current) => current?.jobId === operation.jobId ? { ...current, paused } : current);
+    setOperationTasks((current) => current.map((task) => task.jobId === operation.jobId ? { ...task, paused, status: paused ? "paused" : "running" } : task));
+  }
+
+  function recycleSelection() {
+    if (selectedPaths.size === 0 || !listing) return;
+    setOpenMenu(null);
+    setContextMenu(null);
+    setDeleteRequest({ permanent: false, paths: [...selectedPaths], names: selectedEntries.map((entry) => entry.name) });
+  }
+
+  function permanentlyDeleteSelection() {
+    if (selectedPaths.size === 0 || !listing) return;
+    setOpenMenu(null);
+    setContextMenu(null);
+    setDeleteRequest({ permanent: true, paths: [...selectedPaths], names: selectedEntries.map((entry) => entry.name) });
+  }
+
+  async function confirmDeleteRequest() {
+    const request = deleteRequest;
+    if (!request || !listing) return;
+    setDeleteRequest(null);
+    setRetryTransfer(null);
+    try {
+      const result = await invoke<FileOperationResult>(request.permanent ? "permanently_delete_paths" : "recycle_paths", { paths: request.paths });
+      if (!request.permanent && result.undo) pushUndo(result.undo, language === "zh-CN" ? `移入回收站 ${result.completed} 项` : `Recycle ${result.completed} item(s)`);
+      if (result.issues.length) setOperationIssues(result.issues);
+      await browse(listing.path, activeTabId, false);
+      setStatus(request.permanent
+        ? (result.issues.length ? (language === "zh-CN" ? `已永久删除 ${result.completed} 项，失败 ${result.issues.length} 项` : `Permanently deleted ${result.completed} item(s); ${result.issues.length} failed.`) : (language === "zh-CN" ? `已永久删除 ${result.completed} 项` : `Permanently deleted ${result.completed} item(s).`))
+        : (result.issues.length ? (language === "zh-CN" ? `已移入回收站 ${result.completed} 项，失败 ${result.issues.length} 项` : `Recycled ${result.completed} item(s); ${result.issues.length} failed.`) : (language === "zh-CN" ? `已将 ${result.completed} 项移入回收站` : `Moved ${result.completed} item(s) to the Recycle Bin.`)));
+    } catch (error) { setStatus(String(error)); }
+  }
+
+  async function undoLastOperation() {
+    if (!latestUndo || operation || undoBusy) return;
+    setUndoBusy(true);
+    try {
+      await invoke("undo_operation", { action: latestUndo.action });
+      setUndoStack((current) => current.filter((record) => record.id !== latestUndo.id));
+      if (listing) await browse(listing.path, activeTabId, false);
+      setStatus(language === "zh-CN" ? `已撤销：${latestUndo.label}` : `Undid: ${latestUndo.label}`);
+    } catch (error) { setStatus(language === "zh-CN" ? `无法撤销：${String(error)}` : `Could not undo: ${String(error)}`); }
+    finally { setUndoBusy(false); }
+  }
+
+  function parentDirectory(path: string) {
+    const normalized = path.replace(/[\\/]+$/, "");
+    const separator = normalized.lastIndexOf("\\");
+    if (separator < 2) return `${normalized.slice(0, 2)}\\`;
+    return normalized.slice(0, separator);
+  }
+
+  function clearTabHover() {
+    if (!tabHoverRef.current) return;
+    window.clearTimeout(tabHoverRef.current.timer);
+    tabHoverRef.current = null;
+  }
+
+  function scheduleTabHover(path: string | null) {
+    const tab = path ? tabs.find((candidate) => candidate.path.toLocaleLowerCase() === path.toLocaleLowerCase()) : null;
+    if (!tab || tab.id === activeTabId) { clearTabHover(); return; }
+    if (tabHoverRef.current?.path.toLocaleLowerCase() === tab.path.toLocaleLowerCase()) return;
+    clearTabHover();
+    const timer = window.setTimeout(() => {
+      tabHoverRef.current = null;
+      void activateTab(tab);
+    }, 650);
+    tabHoverRef.current = { path: tab.path, timer };
+  }
+
+  useEffect(() => () => clearTabHover(), []);
+
+  function armPointerDrag(entry: FileEntry, event: ReactPointerEvent<HTMLButtonElement>) {
+    if (event.button !== 0 || renamingPath) return;
+    const paths = selectedPaths.has(entry.path) ? [...selectedPaths] : [entry.path];
+    pointerDragRef.current = { paths, startX: event.clientX, startY: event.clientY, target: null, active: false, dropAllowed: false };
+  }
+
+  function canDropInto(paths: string[], target: string) {
+    const normalizedTarget = target.replace(/[\\/]+$/, "").toLocaleLowerCase();
+    if (paths.some((path) => {
+      const source = path.replace(/[\\/]+$/, "").toLocaleLowerCase();
+      return normalizedTarget === source || normalizedTarget.startsWith(`${source}\\`);
+    })) return false;
+    return !paths.every((path) => parentDirectory(path).replace(/[\\/]+$/, "").toLocaleLowerCase() === normalizedTarget);
+  }
+
+  async function startExternalFileDrag() {
+    const drag = pointerDragRef.current;
+    if (!drag?.active || operation) return;
+    pointerDragRef.current = null;
+    setDragTarget(null);
+    setDragGhost(null);
+    try {
+      const result = await invoke<ExternalDragResult>("start_file_drag", { paths: drag.paths });
+      if (result.effect === "move") {
+        const moved = new Set(drag.paths.map((path) => path.toLocaleLowerCase()));
+        setSearchResults((current) => current ? current.filter((entry) => !moved.has(entry.path.toLocaleLowerCase())) : current);
+        setSelected(null);
+        setSelectedPaths(new Set());
+        setSelectionAnchor(null);
+        if (listing) await refreshDirectory(listing.path);
+      }
+      const messages = language === "zh-CN"
+        ? { copy: "已将文件复制到外部位置", move: "已将文件移动到外部位置", link: "已在外部位置创建快捷方式", none: "已取消外部拖放" }
+        : { copy: "Copied files to the external destination.", move: "Moved files to the external destination.", link: "Created links at the external destination.", none: "External drag cancelled." };
+      setStatus(messages[result.effect]);
+    } catch (error) {
+      setStatus(language === "zh-CN" ? `无法拖出文件：${String(error)}` : `Could not drag files outside Flow Files: ${String(error)}`);
+    }
+  }
+
+  useEffect(() => {
+    const elementAt = (x: number, y: number) => document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-drop-path]") ?? null;
+    const move = (event: PointerEvent) => {
+      const drag = pointerDragRef.current;
+      if (!drag) return;
+      if (!drag.active && Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 6) return;
+      drag.active = true;
+      const targetElement = elementAt(event.clientX, event.clientY);
+      drag.target = targetElement?.dataset.dropPath ?? null;
+      drag.dropAllowed = !!drag.target && canDropInto(drag.paths, drag.target);
+      scheduleTabHover(targetElement?.classList.contains("tab") ? drag.target : null);
+      setDragTarget(drag.dropAllowed ? drag.target : null);
+      setDragGhost({
+        x: event.clientX,
+        y: event.clientY,
+        count: drag.paths.length,
+        mode: drag.target && drag.dropAllowed ? nativeDropMode(drag.paths, drag.target) : "blocked",
+        targetLabel: drag.target ? labelForPath(drag.target) : null,
+      });
+      event.preventDefault();
+    };
+    const finish = () => {
+      const drag = pointerDragRef.current;
+      pointerDragRef.current = null;
+      setDragGhost(null);
+      setDragTarget(null);
+      clearTabHover();
+      if (drag?.active && drag.target && drag.dropAllowed && !operation) void prepareTransfer({ mode: nativeDropMode(drag.paths, drag.target), paths: drag.paths }, drag.target);
+    };
+    window.addEventListener("pointermove", move, { passive: false });
+    window.addEventListener("pointerup", finish);
+    window.addEventListener("pointercancel", finish);
+    return () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", finish); window.removeEventListener("pointercancel", finish); };
+  }, [operation, listing?.path, tabs, activeTabId]);
+
+  useEffect(() => {
+    let disposed = false;
+    let stopListening: (() => void) | undefined;
+    const targetAtPhysicalPosition = (x: number, y: number) => {
+      const scale = window.devicePixelRatio || 1;
+      const element = document.elementFromPoint(x / scale, y / scale)?.closest<HTMLElement>("[data-drop-path]") ?? null;
+      return { path: element?.dataset.dropPath ?? listing?.path ?? null, isTab: !!element?.classList.contains("tab") };
+    };
+    void getCurrentWebview().onDragDropEvent(({ payload }) => {
+      if (disposed) return;
+      if (payload.type === "leave") { nativeDropPathsRef.current = []; setDragTarget(null); clearTabHover(); return; }
+      if (payload.type === "enter") nativeDropPathsRef.current = payload.paths;
+      const target = targetAtPhysicalPosition(payload.position.x, payload.position.y);
+      if (payload.type === "enter" || payload.type === "over") { setDragTarget(target.path); scheduleTabHover(target.isTab ? target.path : null); return; }
+      const paths = payload.paths.length ? payload.paths : nativeDropPathsRef.current;
+      nativeDropPathsRef.current = [];
+      setDragTarget(null);
+      clearTabHover();
+      if (target.path && paths.length && !operation) void prepareTransfer({ mode: nativeDropMode(paths, target.path), paths }, target.path);
+    }).then((unlisten) => { if (disposed) unlisten(); else stopListening = unlisten; });
+    return () => { disposed = true; stopListening?.(); };
+  }, [listing?.path, operation, tabs, activeTabId]);
+
+  useEffect(() => {
+    const prioritizedPaths = selected && visibleImagePaths.includes(selected.path)
+      ? [selected.path, ...visibleImagePaths.filter((path) => path !== selected.path)]
+      : visibleImagePaths;
+    const missingPaths = prioritizedPaths.filter((path) => !thumbnailCache[path]).slice(0, 16);
+    if (missingPaths.length === 0) {
+      thumbnailJobIdRef.current = null;
+      return;
+    }
+    let cancelled = false;
+    const jobId = crypto.randomUUID();
+    thumbnailJobIdRef.current = jobId;
+    void invoke<Thumbnail[]>("load_thumbnails", { jobId, paths: missingPaths })
+      .then((thumbnails) => {
+        if (cancelled || thumbnailJobIdRef.current !== jobId) return;
+        setThumbnailCache((current) => {
+          const next = { ...current };
+          for (const thumbnail of thumbnails) {
+            delete next[thumbnail.path];
+            next[thumbnail.path] = thumbnail.dataUrl;
+          }
+          const surplus = Object.keys(next).length - MAX_CACHED_THUMBNAILS;
+          if (surplus > 0) Object.keys(next).slice(0, surplus).forEach((path) => delete next[path]);
+          return next;
+        });
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+      if (thumbnailJobIdRef.current === jobId) thumbnailJobIdRef.current = null;
+      void invoke("cancel_thumbnail_job", { jobId }).catch(() => undefined);
+    };
+  }, [visibleImageKey, thumbnailCache, selected?.path]);
+
+  useEffect(() => {
+    const missingPaths = visibleIconPaths.filter((path) => !fileIconCache[path]).slice(0, 32);
+    if (missingPaths.length === 0) return;
+    let cancelled = false;
+    void invoke<Thumbnail[]>("load_file_icons", { paths: missingPaths })
+      .then((icons) => {
+        if (cancelled) return;
+        setFileIconCache((current) => {
+          const next = { ...current };
+          for (const icon of icons) {
+            delete next[icon.path];
+            next[icon.path] = icon.dataUrl;
+          }
+          const surplus = Object.keys(next).length - MAX_CACHED_FILE_ICONS;
+          if (surplus > 0) Object.keys(next).slice(0, surplus).forEach((path) => delete next[path]);
+          return next;
+        });
+      })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [visibleIconKey]);
+
+  useEffect(() => {
+    if (!selected || selectedPaths.size !== 1 || (!previewPaneOpen && !quickPreviewOpen)) {
+      previewRequestRef.current += 1;
+      setPreview(null);
+      setPreviewLoading(false);
+      return;
+    }
+    if (selected.isDirectory) {
+      previewRequestRef.current += 1;
+      setPreview({ kind: "none", dataUrl: null, text: null, truncated: false, encoding: null, textOffset: 0, totalBytes: 0 });
+      setPreviewLoading(false);
+      return;
+    }
+    const requestId = ++previewRequestRef.current;
+    let disposed = false;
+    setPreview(null);
+    setPreviewLoading(true);
+    void invoke<FilePreview>("load_file_preview", { path: selected.path, textEncoding: null, textOffset: 0 })
+      .then((result) => { if (!disposed && previewRequestRef.current === requestId) setPreview(result); })
+      .catch(() => { if (!disposed && previewRequestRef.current === requestId) setPreview({ kind: "none", dataUrl: null, text: null, truncated: false, encoding: null, textOffset: 0, totalBytes: 0 }); })
+      .finally(() => { if (!disposed && previewRequestRef.current === requestId) setPreviewLoading(false); });
+    return () => { disposed = true; };
+  }, [selected?.path, selectedPaths.size, previewPaneOpen, quickPreviewOpen]);
+
+  async function loadTextPreviewPage(encoding: string, offset: number) {
+    if (!selected || selected.isDirectory || selectedPaths.size !== 1) return;
+    const requestId = ++previewRequestRef.current;
+    const path = selected.path;
+    setPreviewLoading(true);
+    try {
+      const result = await invoke<FilePreview>("load_file_preview", { path, textEncoding: encoding, textOffset: Math.max(0, offset) });
+      if (previewRequestRef.current === requestId) setPreview(result);
+    } catch (error) {
+      if (previewRequestRef.current === requestId) setStatus(language === "zh-CN" ? `无法读取文本预览：${String(error)}` : `Could not read text preview: ${String(error)}`);
+    } finally {
+      if (previewRequestRef.current === requestId) setPreviewLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!listing) return;
+    let disposed = false;
+    let refreshTimer: number | undefined;
+    let stopListening: (() => void) | undefined;
+    const watchedPath = listing.path;
+    void listen<DirectoryChanged>("directory-changed", ({ payload }) => {
+      if (disposed || payload.path.toLocaleLowerCase() !== watchedPath.toLocaleLowerCase()) return;
+      window.clearTimeout(refreshTimer);
+      refreshTimer = window.setTimeout(() => { void refreshDirectory(watchedPath); }, 180);
+    }).then((unlisten) => {
+      if (disposed) unlisten(); else stopListening = unlisten;
+      return invoke("watch_directory", { path: watchedPath });
+    }).catch((error) => { if (!disposed) setStatus(language === "zh-CN" ? `无法监听文件夹变化：${String(error)}` : `Could not watch this folder: ${String(error)}`); });
+    return () => { disposed = true; window.clearTimeout(refreshTimer); stopListening?.(); };
+  }, [listing?.path, activeTabId, language, searchResults]);
+
+  useEffect(() => {
+    const handleShortcut = (event: KeyboardEvent) => {
+      const target = event.target;
+      if (event.key === "Escape" && (openMenu || contextMenu || tabContextMenu || historyMenu)) { event.preventDefault(); setOpenMenu(null); setContextMenu(null); setTabContextMenu(null); setHistoryMenu(null); return; }
+      if (event.key === "Escape" && deleteRequest) { event.preventDefault(); setDeleteRequest(null); return; }
+      if (event.key === "Escape" && batchRenameOpen && !archiveBusy) { event.preventDefault(); setBatchRenameOpen(false); return; }
+      if (event.key === "Escape" && settingsOpen) { event.preventDefault(); setSettingsOpen(false); return; }
+      if (event.key === "Escape" && spaceHealthOpen) { event.preventDefault(); closeSpaceHealth(); return; }
+      if (event.key === "Escape" && pendingTransfer) { event.preventDefault(); setPendingTransfer(null); return; }
+      if (event.key === "Escape" && quickPreviewOpen) { event.preventDefault(); setQuickPreviewOpen(false); return; }
+      if (event.key === "Escape" && searchResults !== null) { event.preventDefault(); clearDeepSearch(); return; }
+      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || settingsOpen || spaceHealthOpen || pendingTransfer || deleteRequest || batchRenameOpen || quickPreviewOpen) return;
+      const command = event.ctrlKey || event.metaKey;
+      if (command && event.shiftKey && event.key.toLowerCase() === "t") { event.preventDefault(); reopenClosedTab(); }
+      else if (command && event.key.toLowerCase() === "t") { event.preventDefault(); openNewTab(); }
+      else if (command && event.key.toLowerCase() === "w") { event.preventDefault(); if (activeTab && !activeTab.pinned) closeTabById(activeTab.id); }
+      else if (command && event.key.toLowerCase() === "a") { event.preventDefault(); selectAll(); }
+      else if (command && event.key.toLowerCase() === "c") { event.preventDefault(); void copySelection("copy"); }
+      else if (command && event.key.toLowerCase() === "x") { event.preventDefault(); void copySelection("move"); }
+      else if (command && event.key.toLowerCase() === "v") { event.preventDefault(); void pasteIntoCurrent(); }
+      else if (command && event.key.toLowerCase() === "z") { event.preventDefault(); void undoLastOperation(); }
+      else if (command && event.key.toLowerCase() === "l") { event.preventDefault(); beginAddressEditing(); }
+      else if (command && event.key === " ") { event.preventDefault(); toggleFocusedSelection(); }
+      else if (event.altKey && event.key === "Enter" && selectedPaths.size === 1 && selected) { event.preventDefault(); void showSelectedProperties(); }
+      else if (event.shiftKey && event.key === "F10" && selectedPaths.size === 1 && selected) { event.preventDefault(); void showSelectedSystemMenu(); }
+      else if (event.key === "Delete" && event.shiftKey) { event.preventDefault(); void permanentlyDeleteSelection(); }
+      else if (event.key === "Delete") { event.preventDefault(); void recycleSelection(); }
+      else if (event.key === "F2") { event.preventDefault(); beginRename(); }
+      else if (event.key === "F5" && listing) { event.preventDefault(); void browse(listing.path, activeTabId, false); }
+      else if (event.altKey && event.key === "ArrowUp" && listing) { event.preventDefault(); void browse(parentDirectory(listing.path)); }
+      else if (event.key === "Backspace" && listing) { event.preventDefault(); void browse(parentDirectory(listing.path)); }
+      else if (event.key === "ArrowDown") { event.preventDefault(); selectByKeyboard(viewMode === "grid" ? gridColumns : 1, event.shiftKey); }
+      else if (event.key === "ArrowUp") { event.preventDefault(); selectByKeyboard(viewMode === "grid" ? -gridColumns : -1, event.shiftKey); }
+      else if (event.key === "ArrowRight" && viewMode === "grid") { event.preventDefault(); selectByKeyboard(1, event.shiftKey); }
+      else if (event.key === "ArrowLeft" && viewMode === "grid") { event.preventDefault(); selectByKeyboard(-1, event.shiftKey); }
+      else if (event.key === "PageDown") { event.preventDefault(); selectByKeyboard(Math.max(gridColumns, Math.floor(listViewportHeight / rowHeight) * gridColumns), event.shiftKey); }
+      else if (event.key === "PageUp") { event.preventDefault(); selectByKeyboard(-Math.max(gridColumns, Math.floor(listViewportHeight / rowHeight) * gridColumns), event.shiftKey); }
+      else if (event.key === "Home") { event.preventDefault(); selectByKeyboard("start", event.shiftKey); }
+      else if (event.key === "End") { event.preventDefault(); selectByKeyboard("end", event.shiftKey); }
+      else if (event.key === "Enter" && selectedPaths.size === 1 && selected) { event.preventDefault(); void openEntry(selected); }
+      else if (event.key === " " && selectedPaths.size === 1 && selected) { event.preventDefault(); setQuickPreviewOpen(true); }
+    };
+    window.addEventListener("keydown", handleShortcut);
+    return () => window.removeEventListener("keydown", handleShortcut);
+  }, [selectedPaths, selected, selectionAnchor, clipboard, undoAction, undoBusy, operation, listing, activeTabId, activeTab, tabs, openMenu, contextMenu, tabContextMenu, historyMenu, closedTabs, settingsOpen, spaceHealthOpen, pendingTransfer, deleteRequest, batchRenameOpen, archiveBusy, quickPreviewOpen, language, viewMode, gridColumns, rowHeight, listViewportHeight, sortedEntries, searchResults, searching]);
+
+  async function browse(path: string, tabId = activeTabId, recordHistory = true, restoreState: FolderTab | null = null) {
+    if (tabId === null) return;
+    const requestedKey = path.toLocaleLowerCase();
+    const requestedTab = tabs.find((tab) => tab.id === tabId);
+    const openingStoredTab = requestedTab?.path.toLocaleLowerCase() === requestedKey;
+    const driveRoot = /^[A-Za-z]:/.test(path) ? `${path.slice(0, 2)}\\`.toLocaleLowerCase() : null;
+    const knownDisconnected = locations.some((location) => !location.isAvailable && (location.path.toLocaleLowerCase() === requestedKey || (!!driveRoot && location.path.toLocaleLowerCase() === driveRoot)));
+    if (searchResults !== null || searching) clearDeepSearch();
+    const previousJobId = directoryLoadJobIdRef.current;
+    if (previousJobId) void invoke("cancel_directory_load", { jobId: previousJobId }).catch(() => undefined);
+    const jobId = crypto.randomUUID();
+    const previousListing = listingRef.current;
+    directoryLoadJobIdRef.current = jobId;
+    setIsLoading(true);
+    setListing({ path, entries: [], folderCount: 0, fileCount: 0 });
+    setAddress(path);
+    setSelected(null);
+    setSelectedPaths(new Set());
+    setSelectionAnchor(null);
+    setQuickPreviewOpen(false);
+    setQuery("");
+    setScrollTop(0);
+    setStatus(language === "zh-CN" ? "正在打开文件夹…" : "Opening folder…");
+    try {
+      const nextListing = await invoke<DirectoryListing>("list_directory_progressive", { jobId, path });
+      if (directoryLoadJobIdRef.current !== jobId) return;
+      unavailableLocationRef.current = null;
+      setUnavailableLocation(null);
+      markPathAvailability(nextListing.path, true);
+      setTabs((current) => current.map((tab) => {
+        if (tab.id !== tabId) return tab;
+        const knownLocation = locations.find((location) => location.path.toLocaleLowerCase() === nextListing.path.toLocaleLowerCase());
+        const label = knownLocation?.label ?? labelForPath(nextListing.path);
+        if (!recordHistory) return { ...tab, path: nextListing.path, label };
+        const history = [...tab.history.slice(0, tab.historyIndex + 1), nextListing.path];
+        return { ...tab, path: nextListing.path, label, history, historyIndex: history.length - 1, scrollTop: 0, selectedPaths: [] };
+      }));
+      setListing(nextListing);
+      rememberPath(nextListing.path);
+      setTreeChildren((current) => {
+        const key = nextListing.path.toLocaleLowerCase();
+        return Object.prototype.hasOwnProperty.call(current, key) ? { ...current, [key]: nextListing.entries.filter((entry) => entry.isDirectory) } : current;
+      });
+      setAddress(nextListing.path);
+      const existingPaths = new Set(nextListing.entries.map((entry) => entry.path));
+      const restoredSelection = restoreState?.selectedPaths.filter((selectedPath) => existingPaths.has(selectedPath)) ?? [];
+      setSelected(nextListing.entries.find((entry) => entry.path === restoredSelection[0]) ?? null);
+      setSelectedPaths(new Set(restoredSelection));
+      setSelectionAnchor(null);
+      setQuickPreviewOpen(false);
+      setQuery("");
+      const restoredScrollTop = restoreState?.scrollTop ?? 0;
+      if (restoreState) setViewMode(restoreState.viewMode);
+      setScrollTop(restoredScrollTop);
+      window.requestAnimationFrame(() => window.requestAnimationFrame(() => { if (fileListRef.current) fileListRef.current.scrollTop = restoredScrollTop; }));
+      setStatus(language === "zh-CN" ? `${nextListing.folderCount} 个文件夹 · ${nextListing.fileCount} 个文件` : `${nextListing.folderCount} folders · ${nextListing.fileCount} files`);
+    } catch (error) {
+      if (directoryLoadJobIdRef.current !== jobId) return;
+      const preserveDisconnectedView = openingStoredTab || knownDisconnected || path.startsWith("\\\\");
+      if (preserveDisconnectedView) {
+        const disconnected: DirectoryStatus = { path, available: false, kind: path.startsWith("\\\\") ? "network" : /^[A-Za-z]:/.test(path) ? "drive" : "folder", reason: "unknown" };
+        unavailableLocationRef.current = disconnected;
+        setUnavailableLocation(disconnected);
+        markPathAvailability(path, false);
+        if (previousListing?.path.toLocaleLowerCase() === requestedKey) setListing(previousListing);
+        else setListing({ path, entries: [], folderCount: 0, fileCount: 0 });
+        setAddress(path);
+        if (!openingStoredTab && knownDisconnected) {
+          setTabs((current) => current.map((tab) => {
+            if (tab.id !== tabId) return tab;
+            const label = locations.find((location) => location.path.toLocaleLowerCase() === requestedKey)?.label ?? labelForPath(path);
+            if (!recordHistory) return { ...tab, path, label };
+            const history = [...tab.history.slice(0, tab.historyIndex + 1), path];
+            return { ...tab, path, label, history, historyIndex: history.length - 1, scrollTop: 0, selectedPaths: [] };
+          }));
+        }
+        setStatus(language === "zh-CN" ? `“${path}”暂时不可用；恢复连接后会自动同步。` : `“${path}” is unavailable and will sync when it reconnects.`);
+      } else if (previousListing) {
+        setListing(previousListing);
+        setAddress(previousListing.path);
+        setStatus(language === "zh-CN" ? `无法打开“${path}”：${String(error)}` : `Could not open “${path}”: ${String(error)}`);
+      } else {
+        setStatus(language === "zh-CN" ? `无法打开“${path}”：${String(error)}` : `Could not open “${path}”: ${String(error)}`);
+      }
+    } finally {
+      if (directoryLoadJobIdRef.current === jobId) {
+        directoryLoadJobIdRef.current = null;
+        setIsLoading(false);
+      }
+    }
+  }
+
+  async function openExternalTarget(target: ExternalOpenTarget) {
+    const targetKey = target.directory.toLocaleLowerCase();
+    const selectedPaths = target.selectedPath ? [target.selectedPath] : [];
+    let targetTab = tabsRef.current.find((tab) => tab.path.toLocaleLowerCase() === targetKey) ?? null;
+    if (!targetTab) {
+      externalTabSeedRef.current += 1;
+      targetTab = {
+        id: Date.now() + externalTabSeedRef.current,
+        path: target.directory,
+        label: labelForPath(target.directory),
+        pinned: false,
+        history: [target.directory],
+        historyIndex: 0,
+        scrollTop: 0,
+        viewMode,
+        selectedPaths,
+      };
+      setTabs((current) => [...current, targetTab!]);
+    } else {
+      const tabId = targetTab.id;
+      setTabs((current) => current.map((tab) => tab.id === tabId ? { ...tab, selectedPaths, scrollTop: 0 } : tab));
+      targetTab = { ...targetTab, selectedPaths, scrollTop: 0 };
+    }
+    setActiveTabId(targetTab.id);
+    await browse(target.directory, targetTab.id, false, targetTab);
+  }
+
+  useEffect(() => {
+    if (!startupComplete) return;
+    let disposed = false;
+    const openTargets = (targets: ExternalOpenTarget[]) => {
+      if (disposed || !targets.length) return;
+      void (async () => {
+        for (const target of targets) {
+          if (disposed) return;
+          await openExternalTarget(target);
+        }
+      })();
+    };
+    const unlistenPromise = listen<ExternalOpenTarget[]>("flow-open-targets", (event) => openTargets(event.payload));
+    void invoke<ExternalOpenTarget[]>("take_external_open_targets").then(openTargets).catch(() => undefined);
+    return () => {
+      disposed = true;
+      void unlistenPromise.then((unlisten) => unlisten());
+    };
+  }, [startupComplete]);
+
+  useEffect(() => {
+    void invoke<FolderIntegrationStatus>("get_folder_integration_status")
+      .then(setFolderIntegration)
+      .catch(() => setFolderIntegration(null));
+    void invoke<FolderIntegrationStatus>("get_folder_context_menu_status")
+      .then(setFolderContextMenu)
+      .catch(() => setFolderContextMenu(null));
+  }, []);
+
+  async function toggleFolderIntegration() {
+    const enabled = !(folderIntegration?.enabled ?? false);
+    setFolderIntegrationBusy(true);
+    setFolderIntegrationError(null);
+    try {
+      setFolderIntegration(await invoke<FolderIntegrationStatus>("set_folder_integration_enabled", { enabled }));
+    } catch (error) {
+      setFolderIntegrationError(`${text.windowsFolderIntegrationFailed}: ${String(error)}`);
+    } finally {
+      setFolderIntegrationBusy(false);
+    }
+  }
+
+  async function toggleFolderContextMenu() {
+    const enabled = !(folderContextMenu?.enabled ?? false);
+    setFolderContextMenuBusy(true);
+    setFolderContextMenuError(null);
+    try {
+      setFolderContextMenu(await invoke<FolderIntegrationStatus>("set_folder_context_menu_enabled", { enabled }));
+    } catch (error) {
+      setFolderContextMenuError(`${text.explorerContextMenuFailed}: ${String(error)}`);
+    } finally {
+      setFolderContextMenuBusy(false);
+    }
+  }
+
+  async function refreshDirectory(path: string) {
+    try {
+      const nextListing = await invoke<DirectoryListing>("list_directory", { path });
+      const previousListing = listingRef.current;
+      if (previousListing?.path.toLocaleLowerCase() === nextListing.path.toLocaleLowerCase()) {
+        const previousByPath = new Map(previousListing.entries.map((entry) => [entry.path.toLocaleLowerCase(), entry]));
+        const nextPaths = new Set(nextListing.entries.map((entry) => entry.path.toLocaleLowerCase()));
+        const invalidPaths = new Set<string>();
+        for (const previous of previousListing.entries) {
+          if (!nextPaths.has(previous.path.toLocaleLowerCase())) invalidPaths.add(previous.path);
+        }
+        for (const entry of nextListing.entries) {
+          const previous = previousByPath.get(entry.path.toLocaleLowerCase());
+          if (previous && (previous.size !== entry.size || previous.modifiedUnixSeconds !== entry.modifiedUnixSeconds || previous.extension !== entry.extension)) {
+            invalidPaths.add(entry.path);
+          }
+        }
+        if (invalidPaths.size) {
+          const thumbnailJobId = thumbnailJobIdRef.current;
+          if (thumbnailJobId) void invoke("cancel_thumbnail_job", { jobId: thumbnailJobId }).catch(() => undefined);
+          setThumbnailCache((current) => {
+            const next = { ...current };
+            invalidPaths.forEach((invalidPath) => delete next[invalidPath]);
+            return next;
+          });
+          setFileIconCache((current) => {
+            const next = { ...current };
+            invalidPaths.forEach((invalidPath) => delete next[invalidPath]);
+            return next;
+          });
+        }
+      }
+      setListing((current) => current?.path.toLocaleLowerCase() === path.toLocaleLowerCase() ? nextListing : current);
+      setTreeChildren((current) => {
+        const key = nextListing.path.toLocaleLowerCase();
+        return Object.prototype.hasOwnProperty.call(current, key) ? { ...current, [key]: nextListing.entries.filter((entry) => entry.isDirectory) } : current;
+      });
+      if (searchResults === null) {
+        const existingPaths = new Set(nextListing.entries.map((entry) => entry.path));
+        setSelectedPaths((current) => new Set([...current].filter((selectedPath) => existingPaths.has(selectedPath))));
+        setSelected((current) => current ? (nextListing.entries.find((entry) => entry.path === current.path) ?? null) : null);
+      }
+      setStatus(language === "zh-CN" ? `${nextListing.folderCount} 个文件夹 · ${nextListing.fileCount} 个文件 · 已自动同步` : `${nextListing.folderCount} folders · ${nextListing.fileCount} files · Synced`);
+    } catch (error) {
+      setStatus(language === "zh-CN" ? `自动刷新失败：${String(error)}` : `Automatic refresh failed: ${String(error)}`);
+    }
+  }
+
+  async function activateTab(tab: FolderTab) {
+    setTabs((current) => current.map((candidate) => candidate.id === activeTabId ? { ...candidate, scrollTop, viewMode, selectedPaths: [...selectedPaths] } : candidate));
+    setActiveTabId(tab.id);
+    await browse(tab.path, tab.id, false, tab);
+  }
+
+  function openNewTab(path = activeTab?.path) {
+    if (!path) return;
+    const tab: FolderTab = { id: Date.now(), path, label: labelForPath(path), pinned: false, history: [path], historyIndex: 0, scrollTop: 0, viewMode, selectedPaths: [] };
+    setTabs((current) => [...current, tab]);
+    setActiveTabId(tab.id);
+    void browse(path, tab.id, false, tab);
+  }
+
+  function openTabContextMenu(tabId: number, event: ReactMouseEvent) {
+    event.preventDefault();
+    event.stopPropagation();
+    setContextMenu(null);
+    setOpenMenu(null);
+    setTabContextMenu({ x: Math.min(event.clientX, window.innerWidth - 230), y: Math.min(event.clientY, window.innerHeight - 150), tabId });
+  }
+
+  function armTabReorder(tabId: number, event: ReactPointerEvent<HTMLButtonElement>) {
+    if (event.button !== 0 || (event.target instanceof Element && event.target.closest(".tab-close"))) return;
+    tabReorderRef.current = { tabId, startX: event.clientX, startY: event.clientY, active: false, targetId: null, side: "before" };
+  }
+
+  useEffect(() => {
+    const move = (event: PointerEvent) => {
+      const drag = tabReorderRef.current;
+      if (!drag) return;
+      if (!drag.active && Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 5) return;
+      if (!drag.active) {
+        drag.active = true;
+        suppressTabClickRef.current = true;
+        setDraggedTabId(drag.tabId);
+        document.body.style.cursor = "grabbing";
+      }
+      const targetElement = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>(".tab[data-tab-id]") ?? null;
+      const targetId = Number(targetElement?.dataset.tabId);
+      const source = tabs.find((tab) => tab.id === drag.tabId);
+      const target = Number.isFinite(targetId) ? tabs.find((tab) => tab.id === targetId) : null;
+      if (!source || !target || source.id === target.id || source.pinned !== target.pinned || !targetElement) {
+        drag.targetId = null;
+        setTabDropId(null);
+      } else {
+        const bounds = targetElement.getBoundingClientRect();
+        drag.targetId = target.id;
+        drag.side = event.clientX < bounds.left + bounds.width / 2 ? "before" : "after";
+        setTabDropId(target.id);
+        setTabDropSide(drag.side);
+      }
+      event.preventDefault();
+    };
+    const finish = (cancelled: boolean) => {
+      const drag = tabReorderRef.current;
+      tabReorderRef.current = null;
+      document.body.style.cursor = "";
+      if (drag?.active && !cancelled && drag.targetId !== null) {
+        setTabs((current) => {
+          const source = current.find((tab) => tab.id === drag.tabId);
+          const target = current.find((tab) => tab.id === drag.targetId);
+          if (!source || !target || source.pinned !== target.pinned) return current;
+          const next = current.filter((tab) => tab.id !== source.id);
+          const targetIndex = next.findIndex((tab) => tab.id === target.id);
+          next.splice(targetIndex + (drag.side === "after" ? 1 : 0), 0, source);
+          return next;
+        });
+      }
+      setDraggedTabId(null);
+      setTabDropId(null);
+      if (drag?.active) window.setTimeout(() => { suppressTabClickRef.current = false; }, 0);
+    };
+    const release = () => finish(false);
+    const cancel = () => finish(true);
+    window.addEventListener("pointermove", move, { passive: false });
+    window.addEventListener("pointerup", release);
+    window.addEventListener("pointercancel", cancel);
+    return () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", release);
+      window.removeEventListener("pointercancel", cancel);
+      document.body.style.cursor = "";
+    };
+  }, [tabs]);
+
+  function toggleTabPinned(tabId: number) {
+    setTabs((current) => {
+      const updated = current.map((tab) => tab.id === tabId ? { ...tab, pinned: !tab.pinned } : tab);
+      return [...updated.filter((tab) => tab.pinned), ...updated.filter((tab) => !tab.pinned)];
+    });
+    setTabContextMenu(null);
+  }
+
+  function closeTabById(tabId: number) {
+    const tab = tabs.find((candidate) => candidate.id === tabId);
+    if (!tab || tab.pinned || tabs.length === 1) return;
+    const closedTab = tabId === activeTabId ? { ...tab, scrollTop, viewMode, selectedPaths: [...selectedPaths] } : tab;
+    setClosedTabs((current) => [closedTab, ...current].slice(0, 10));
+    const closingIndex = tabs.findIndex((candidate) => candidate.id === tabId);
+    const remaining = tabs.filter((candidate) => candidate.id !== tabId);
+    setTabs(remaining);
+    setTabContextMenu(null);
+    if (tabId === activeTabId) void activateTab(remaining[Math.min(closingIndex, remaining.length - 1)]);
+  }
+
+  function closeOtherTabs(tabId: number) {
+    const target = tabs.find((tab) => tab.id === tabId);
+    if (!target) return;
+    const remaining = tabs.filter((tab) => tab.id === tabId || tab.pinned);
+    const newlyClosed = tabs.filter((tab) => tab.id !== tabId && !tab.pinned);
+    if (newlyClosed.length) setClosedTabs((current) => [...newlyClosed.reverse(), ...current].slice(0, 10));
+    setTabs(remaining);
+    setTabContextMenu(null);
+    if (!remaining.some((tab) => tab.id === activeTabId)) void activateTab(target);
+  }
+
+  function closeTab(event: ReactMouseEvent, tabId: number) {
+    event.stopPropagation();
+    closeTabById(tabId);
+  }
+
+  function duplicateTab(tab: FolderTab) {
+    const source = tab.id === activeTabId ? { ...tab, scrollTop, viewMode, selectedPaths: [...selectedPaths] } : tab;
+    const duplicate: FolderTab = { ...source, id: Date.now(), pinned: false, history: [...source.history], selectedPaths: [...source.selectedPaths] };
+    setTabs((current) => {
+      const index = current.findIndex((candidate) => candidate.id === tab.id);
+      const next = [...current];
+      next.splice(index + 1, 0, duplicate);
+      return next;
+    });
+    setTabContextMenu(null);
+    setActiveTabId(duplicate.id);
+    void browse(duplicate.path, duplicate.id, false, duplicate);
+  }
+
+  function reopenClosedTab() {
+    const [closed, ...remaining] = closedTabs;
+    if (!closed) return;
+    const reopened: FolderTab = { ...closed, id: Date.now(), pinned: false, history: [...closed.history], selectedPaths: [...closed.selectedPaths] };
+    setClosedTabs(remaining);
+    setTabs((current) => [...current, reopened]);
+    setTabContextMenu(null);
+    setActiveTabId(reopened.id);
+    void browse(reopened.path, reopened.id, false, reopened);
+  }
+
+  function openHistoryMenu(direction: "back" | "forward", event: ReactMouseEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    if (!activeTab) return;
+    const items = direction === "back"
+      ? activeTab.history.slice(0, activeTab.historyIndex).map((path, index) => ({ path, index })).reverse()
+      : activeTab.history.slice(activeTab.historyIndex + 1).map((path, offset) => ({ path, index: activeTab.historyIndex + offset + 1 }));
+    if (!items.length) return;
+    setContextMenu(null);
+    setTabContextMenu(null);
+    setHistoryMenu({ x: Math.min(event.clientX, window.innerWidth - 280), y: Math.min(event.clientY, window.innerHeight - 260), items });
+  }
+
+  function navigateToHistory(index: number, path: string) {
+    if (!activeTab) return;
+    setTabs((current) => current.map((tab) => tab.id === activeTab.id ? { ...tab, historyIndex: index } : tab));
+    setHistoryMenu(null);
+    void browse(path, activeTab.id, false);
+  }
+
+  function goBack() {
+    if (!activeTab || activeTab.historyIndex === 0) return;
+    const nextIndex = activeTab.historyIndex - 1;
+    setTabs((current) => current.map((tab) => tab.id === activeTab.id ? { ...tab, historyIndex: nextIndex } : tab));
+    void browse(activeTab.history[nextIndex], activeTab.id, false);
+  }
+
+  function goForward() {
+    if (!activeTab || activeTab.historyIndex >= activeTab.history.length - 1) return;
+    const nextIndex = activeTab.historyIndex + 1;
+    setTabs((current) => current.map((tab) => tab.id === activeTab.id ? { ...tab, historyIndex: nextIndex } : tab));
+    void browse(activeTab.history[nextIndex], activeTab.id, false);
+  }
+
+  async function openEntry(entry: FileEntry) {
+    if (entry.isDirectory) { await browse(entry.path); return; }
+    try { await invoke("open_path", { path: entry.path }); setStatus(language === "zh-CN" ? `已打开 ${entry.name}` : `Opened ${entry.name}.`); }
+    catch (error) { setStatus(language === "zh-CN" ? `无法打开 ${entry.name}：${String(error)}` : `Could not open ${entry.name}: ${String(error)}`); }
+  }
+
+  async function createItem(kind: "folder" | "text" | "markdown") {
+    if (!listing || operation || searchResults !== null) return;
+    const parentPath = listing.path;
+    const baseName = kind === "folder"
+      ? (language === "zh-CN" ? "新建文件夹" : "New folder")
+      : kind === "text"
+        ? (language === "zh-CN" ? "新建文本文档.txt" : "New Text Document.txt")
+        : (language === "zh-CN" ? "新建 Markdown 文档.md" : "New Markdown Document.md");
+    const existingNames = new Set(listing.entries.map((entry) => entry.name.toLocaleLowerCase()));
+    let name = baseName;
+    const extensionIndex = kind === "folder" ? -1 : baseName.lastIndexOf(".");
+    const stem = extensionIndex > 0 ? baseName.slice(0, extensionIndex) : baseName;
+    const extension = extensionIndex > 0 ? baseName.slice(extensionIndex) : "";
+    for (let suffix = 2; existingNames.has(name.toLocaleLowerCase()); suffix += 1) name = `${stem} (${suffix})${extension}`;
+    setOpenMenu(null);
+    setContextMenu(null);
+    try {
+      await invoke(kind === "folder" ? "create_folder" : "create_file", { parentPath, name });
+      const nextListing = await invoke<DirectoryListing>("list_directory", { path: parentPath });
+      const created = nextListing.entries.find((entry) => entry.name.toLocaleLowerCase() === name.toLocaleLowerCase() && entry.isDirectory === (kind === "folder"));
+      setListing(nextListing);
+      setTreeChildren((current) => {
+        const key = parentPath.toLocaleLowerCase();
+        return Object.prototype.hasOwnProperty.call(current, key) ? { ...current, [key]: nextListing.entries.filter((entry) => entry.isDirectory) } : current;
+      });
+      setQuery("");
+      if (created) {
+        pushUndo({ kind: "deleteCreated", paths: [created.path] }, language === "zh-CN" ? `新建“${created.name}”` : `Create “${created.name}”`);
+        const visible = sortEntriesForView(showHidden ? nextListing.entries : nextListing.entries.filter((entry) => !entry.isHidden), sortKey, sortDirection, language);
+        const index = Math.max(0, visible.findIndex((entry) => entry.path === created.path));
+        const targetTop = Math.floor(index / gridColumns) * rowHeight;
+        setSelected(created);
+        setSelectedPaths(new Set([created.path]));
+        setSelectionAnchor(index);
+        setRenamingPath(created.path);
+        setRenameValue(created.name);
+        setRenameError(null);
+        setScrollTop(targetTop);
+        window.requestAnimationFrame(() => { if (fileListRef.current) fileListRef.current.scrollTop = targetTop; });
+      }
+      setStatus(language === "zh-CN" ? "项目已创建，请直接输入名称" : "Item created. Type its name.");
+    } catch (error) { setStatus(language === "zh-CN" ? `无法创建项目：${String(error)}` : `Could not create item: ${String(error)}`); }
+  }
+
+  async function compressSelection() {
+    if (!listing || selectedEntries.length === 0 || operation || archiveBusy) return;
+    const first = selectedEntries[0];
+    const firstStem = first.isDirectory ? first.name : first.name.replace(/\.[^.]+$/, "") || first.name;
+    const archiveName = `${selectedEntries.length === 1 ? firstStem : language === "zh-CN" ? "压缩文件" : "Archive"}.zip`;
+    setOpenMenu(null);
+    setContextMenu(null);
+    setArchiveBusy(true);
+    setStatus(language === "zh-CN" ? `正在压缩 ${selectedEntries.length} 项…` : `Compressing ${selectedEntries.length} item(s)…`);
+    try {
+      const output = await invoke<string>("create_zip_archive", { paths: selectedEntries.map((entry) => entry.path), destination: listing.path, archiveName });
+      pushUndo({ kind: "deleteCreated", paths: [output] }, language === "zh-CN" ? `创建压缩包“${labelForPath(output)}”` : `Create archive “${labelForPath(output)}”`);
+      await browse(listing.path, activeTabId, false);
+      setStatus(language === "zh-CN" ? `已创建 ${output}` : `Created ${output}.`);
+    } catch (error) {
+      setStatus(language === "zh-CN" ? `压缩失败：${String(error)}` : `Compression failed: ${String(error)}`);
+    } finally {
+      setArchiveBusy(false);
+    }
+  }
+
+  async function extractSelectedZip() {
+    if (!listing || selectedEntries.length !== 1 || selectedEntries[0].extension?.toLowerCase() !== "zip" || operation || archiveBusy) return;
+    const source = selectedEntries[0];
+    setOpenMenu(null);
+    setContextMenu(null);
+    setArchiveBusy(true);
+    setStatus(language === "zh-CN" ? `正在解压 ${source.name}…` : `Extracting ${source.name}…`);
+    try {
+      const output = await invoke<string>("extract_zip_archive", { path: source.path, destination: listing.path });
+      pushUndo({ kind: "deleteCreated", paths: [output] }, language === "zh-CN" ? `解压“${source.name}”` : `Extract “${source.name}”`);
+      await browse(listing.path, activeTabId, false);
+      setStatus(language === "zh-CN" ? `已解压到 ${output}` : `Extracted to ${output}.`);
+    } catch (error) {
+      setStatus(language === "zh-CN" ? `解压失败：${String(error)}` : `Extraction failed: ${String(error)}`);
+    } finally {
+      setArchiveBusy(false);
+    }
+  }
+
+  function beginBatchRename() {
+    if (selectedEntries.length < 2 || operation || archiveBusy) return;
+    setOpenMenu(null);
+    setContextMenu(null);
+    setBatchRenameError(null);
+    setBatchRenameDraft({ find: "", replace: "", prefix: "", suffix: "", addNumbers: false, startNumber: 1 });
+    setBatchRenameOpen(true);
+  }
+
+  async function applyBatchRename() {
+    if (!listing || archiveBusy) return;
+    const changed = batchRenamePreview.filter(({ entry, name }) => name !== entry.name);
+    if (!changed.length) {
+      setBatchRenameError(language === "zh-CN" ? "请先设置至少一种名称变化。" : "Choose at least one name change first.");
+      return;
+    }
+    const invalid = changed.find(({ name }) => !name.trim() || /[\\/:*?"<>|]/.test(name) || /[. ]$/.test(name));
+    if (invalid) {
+      setBatchRenameError(language === "zh-CN" ? `“${invalid.name}”不是有效的 Windows 名称。` : `“${invalid.name}” is not a valid Windows name.`);
+      return;
+    }
+    const targets = changed.map(({ entry, name }) => joinWindowsPath(parentDirectory(entry.path), name).toLocaleLowerCase());
+    if (new Set(targets).size !== targets.length) {
+      setBatchRenameError(language === "zh-CN" ? "有两个项目会得到相同名称。" : "Two items would receive the same name.");
+      return;
+    }
+    setArchiveBusy(true);
+    setBatchRenameError(null);
+    try {
+      const undo = await invoke<UndoAction>("batch_rename", { items: changed.map(({ entry, name }) => ({ from: entry.path, to: joinWindowsPath(parentDirectory(entry.path), name) })) });
+      pushUndo(undo, language === "zh-CN" ? `批量重命名 ${changed.length} 项` : `Batch rename ${changed.length} item(s)`);
+      setBatchRenameOpen(false);
+      setSelected(null);
+      setSelectedPaths(new Set());
+      await browse(listing.path, activeTabId, false);
+      setStatus(language === "zh-CN" ? `已重命名 ${changed.length} 个项目，可撤销` : `Renamed ${changed.length} item(s). You can undo this operation.`);
+    } catch (error) {
+      setBatchRenameError(friendlyRenameError(error));
+    } finally {
+      setArchiveBusy(false);
+    }
+  }
+
+  function beginRename() {
+    if (!selected || selectedPaths.size !== 1 || operation || searchResults !== null) return;
+    setRenamingPath(selected.path);
+    setRenameValue(selected.name);
+    setRenameError(null);
+    setOpenMenu(null);
+  }
+
+  function friendlyRenameError(error: unknown) {
+    const raw = String(error).replace(/^Error:\s*/i, "");
+    if (/already exists|os error 183/i.test(raw)) return language === "zh-CN" ? "同一文件夹中已经有同名项目。" : "An item with this name already exists.";
+    if (/cannot contain/i.test(raw)) return language === "zh-CN" ? "名称不能包含 \\ / : * ? \" < > |。" : "The name cannot contain \\ / : * ? \" < > |.";
+    if (/end with a space or period/i.test(raw)) return language === "zh-CN" ? "名称不能以空格或句点结尾。" : "The name cannot end with a space or period.";
+    if (/reserved by Windows/i.test(raw)) return language === "zh-CN" ? "这是 Windows 保留名称，请换一个名称。" : "This name is reserved by Windows.";
+    if (/too long/i.test(raw)) return language === "zh-CN" ? "名称太长。" : "The name is too long.";
+    if (/valid name/i.test(raw)) return language === "zh-CN" ? "请输入有效名称。" : "Enter a valid name.";
+    return language === "zh-CN" ? `无法重命名：${raw}` : `Could not rename item: ${raw}`;
+  }
+
+  async function commitRename() {
+    const source = selected;
+    const newName = renameValue;
+    if (!source || !listing) return;
+    if (!newName) { setRenameError(language === "zh-CN" ? "名称不能为空。" : "The name cannot be empty."); return; }
+    if (newName === source.name) { setRenamingPath(null); setRenameError(null); return; }
+    try {
+      await invoke("rename_path", { path: source.path, newName });
+      const renamedPath = joinWindowsPath(parentDirectory(source.path), newName.trim());
+      pushUndo({ kind: "move", pairs: [{ from: renamedPath, to: source.path }] }, language === "zh-CN" ? `将“${source.name}”重命名为“${newName.trim()}”` : `Rename “${source.name}” to “${newName.trim()}”`);
+      setRenamingPath(null);
+      setRenameError(null);
+      await refreshDirectory(listing.path);
+      setStatus(language === "zh-CN" ? `已重命名为“${newName}”` : `Renamed to “${newName}”.`);
+    } catch (error) {
+      const message = friendlyRenameError(error);
+      setRenameError(message);
+      setStatus(message);
+      window.setTimeout(() => { renameInputRef.current?.focus(); renameInputRef.current?.select(); }, 0);
+    }
+  }
+
+  async function openTerminalAt(path = listing?.path, mode: "shell" | "claude" = "shell") {
+    if (!path) return;
+    try {
+      await invoke("open_terminal", { path, mode, provider: mode === "claude" ? claudeProvider : null, fullAccess: mode === "claude" ? claudeFullAccess : false });
+      setStatus(mode === "claude"
+        ? (language === "zh-CN" ? `已在 ${path} 启动 Claude Code（${claudeProvider === "deepseek" ? "DeepSeek" : "Anthropic"}）` : `Started Claude Code in ${path} (${claudeProvider === "deepseek" ? "DeepSeek" : "Anthropic"}).`)
+        : (language === "zh-CN" ? `已在 ${path} 打开终端` : `Opened Terminal in ${path}.`));
+    } catch (error) {
+      if (mode === "claude" && claudeProvider === "deepseek") {
+        setSettingsOpen(true);
+        setClaudeCredentialError(language === "zh-CN" ? "请先在下方保存 DeepSeek API 密钥。保存一次后，以后会自动使用。" : "Save your DeepSeek API key below. Flow Files will reuse it automatically.");
+      }
+      setStatus(mode === "claude"
+        ? (language === "zh-CN" ? `无法启动 Claude Code：${String(error)}` : `Could not start Claude Code: ${String(error)}`)
+        : (language === "zh-CN" ? `无法打开终端：${String(error)}` : `Could not open Terminal: ${String(error)}`));
+    }
+  }
+
+  function terminalPathForSelection() {
+    return selectedPaths.size === 1 && selected?.isDirectory ? selected.path : listing?.path;
+  }
+
+  async function openWithSelected() {
+    if (!selected || selectedPaths.size !== 1 || selected.isDirectory) return;
+    try {
+      await invoke("open_with", { path: selected.path });
+      setStatus(language === "zh-CN" ? `正在选择用于打开“${selected.name}”的应用` : `Choosing an app for “${selected.name}”.`);
+    } catch (error) {
+      setStatus(language === "zh-CN" ? `无法打开“打开方式”：${String(error)}` : `Could not open the app chooser: ${String(error)}`);
+    }
+  }
+
+  async function showSelectedProperties() {
+    if (!selected || selectedPaths.size !== 1) return;
+    try {
+      await invoke("show_properties", { path: selected.path });
+    } catch (error) {
+      setStatus(language === "zh-CN" ? `无法显示属性：${String(error)}` : `Could not show Properties: ${String(error)}`);
+    }
+  }
+
+  async function revealSelectedInExplorer() {
+    if (!selected || selectedPaths.size !== 1) return;
+    setContextMenu(null);
+    try {
+      await invoke("reveal_in_explorer", { path: selected.path });
+    } catch (error) {
+      setStatus(language === "zh-CN" ? `无法在资源管理器中定位：${String(error)}` : `Could not reveal the item in File Explorer: ${String(error)}`);
+    }
+  }
+
+  async function showSelectedSystemMenu() {
+    if (!selected || selectedPaths.size !== 1) return;
+    setContextMenu(null);
+    try {
+      await invoke("show_system_context_menu", { path: selected.path });
+    } catch (error) {
+      setStatus(language === "zh-CN" ? `无法打开 Windows 系统菜单：${String(error)}` : `Could not open the Windows system menu: ${String(error)}`);
+    }
+  }
+
+  async function calculateSelectedFolderSize() {
+    if (!selected?.isDirectory || selectedPaths.size !== 1) return;
+    const previousJobId = folderSizeJobIdRef.current;
+    if (previousJobId) void invoke("cancel_folder_size", { jobId: previousJobId }).catch(() => undefined);
+    const jobId = crypto.randomUUID();
+    folderSizeJobIdRef.current = jobId;
+    setFolderSize({ path: selected.path, totalBytes: 0, scannedFiles: 0, scannedFolders: 0, issues: 0, cancelled: false, running: true });
+    try {
+      const result = await invoke<FolderSizeResult>("calculate_folder_size", { jobId, path: selected.path });
+      if (folderSizeJobIdRef.current !== jobId) return;
+      setFolderSize({ ...result, running: false });
+      if (!result.cancelled) setStatus(language === "zh-CN" ? `文件夹大小：${formatSize(result.totalBytes)}` : `Folder size: ${formatSize(result.totalBytes)}`);
+    } catch (error) {
+      if (folderSizeJobIdRef.current !== jobId) return;
+      setFolderSize(null);
+      setStatus(language === "zh-CN" ? `无法计算文件夹大小：${String(error)}` : `Could not calculate folder size: ${String(error)}`);
+    } finally {
+      if (folderSizeJobIdRef.current === jobId) folderSizeJobIdRef.current = null;
+    }
+  }
+
+  function cancelFolderSizeCalculation() {
+    const jobId = folderSizeJobIdRef.current;
+    if (!jobId) return;
+    void invoke("cancel_folder_size", { jobId }).catch(() => undefined);
+    setFolderSize((current) => current ? { ...current, running: false, cancelled: true } : current);
+  }
+
+  function beginAddressEditing() {
+    setAddress(listing?.path ?? address);
+    setAddressSuggestionIndex(-1);
+    setAddressEditing(true);
+    window.setTimeout(() => { addressInputRef.current?.focus(); addressInputRef.current?.select(); }, 0);
+  }
+
+  function chooseAddressSuggestion(suggestion: PathSuggestion) {
+    setAddress(suggestion.path);
+    setAddressSuggestions([]);
+    setAddressSuggestionIndex(-1);
+    setAddressEditing(false);
+    void browse(suggestion.path);
+  }
+
+  function handleAddressKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "ArrowDown" && addressSuggestions.length) {
+      event.preventDefault();
+      setAddressSuggestionIndex((current) => current >= addressSuggestions.length - 1 ? 0 : current + 1);
+    } else if (event.key === "ArrowUp" && addressSuggestions.length) {
+      event.preventDefault();
+      setAddressSuggestionIndex((current) => current <= 0 ? addressSuggestions.length - 1 : current - 1);
+    } else if (event.key === "Tab" && addressSuggestions.length) {
+      event.preventDefault();
+      const suggestion = addressSuggestions[addressSuggestionIndex >= 0 ? addressSuggestionIndex : 0];
+      setAddress(suggestion.path.endsWith("\\") ? suggestion.path : `${suggestion.path}\\`);
+      setAddressSuggestionIndex(-1);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      setAddress(listing?.path ?? "");
+      setAddressEditing(false);
+    }
+  }
+
+  function submitAddress(event: FormEvent) {
+    event.preventDefault();
+    const selectedSuggestion = addressSuggestionIndex >= 0 ? addressSuggestions[addressSuggestionIndex] : null;
+    const target = selectedSuggestion?.path ?? address.trim();
+    if (target) void browse(target);
+    setAddressSuggestions([]);
+    setAddressSuggestionIndex(-1);
+    setAddressEditing(false);
+  }
+
+  function openSpaceHealth() {
+    const systemDrive = locations.find((location) => location.path.toLocaleLowerCase() === "c:\\")
+      ?? locations.find((location) => /^[A-Za-z]:\\$/.test(location.path) && location.isAvailable);
+    if (systemDrive && !spaceScanResult) {
+      setSpaceScanDrive(systemDrive.path);
+      setSpaceScanRoot(systemDrive.path);
+    }
+    setOpenMenu(null);
+    setTaskCenterOpen(false);
+    setSettingsOpen(false);
+    setSpaceHealthOpen(true);
+  }
+
+  async function startSpaceScan(root = spaceScanRoot) {
+    const previous = spaceScanJobIdRef.current;
+    if (previous) await invoke("cancel_space_scan", { jobId: previous }).catch(() => undefined);
+    const jobId = crypto.randomUUID();
+    const wholeDrive = /^[A-Za-z]:\\$/.test(root);
+    const snapshotKey = root.toLocaleLowerCase();
+    setSpaceScanRoot(root);
+    setSpacePreviousSnapshot(wholeDrive ? readSpaceScanSnapshots()[snapshotKey] ?? null : null);
+    spaceScanJobIdRef.current = jobId;
+    setSpaceScanning(true);
+    setSpaceScanProgress({ jobId, scannedBytes: 0, scannedFiles: 0, scannedFolders: 0, issues: 0, currentPath: root });
+    setSpaceScanResult(null);
+    setSpaceScanError(null);
+    setSpaceAdviceCategoryId(null);
+    setSpaceCleanupPreview(null);
+    setSpaceCleanupSelected(new Set());
+    setSpaceCleanupAge("all");
+    setSpaceCleanupConfirmOpen(false);
+    setSpaceCleanupMessage(null);
+    setSpaceCleanupError(null);
+    const duplicateJob = duplicateScanJobIdRef.current;
+    if (duplicateJob) await invoke("cancel_duplicate_scan", { jobId: duplicateJob }).catch(() => undefined);
+    duplicateScanJobIdRef.current = null;
+    setDuplicateScanning(false);
+    setDuplicateProgress(null);
+    setDuplicateResult(null);
+    setDuplicateError(null);
+    try {
+      const result = await invoke<SpaceScanResult>("scan_disk_space", { jobId, root });
+      if (spaceScanJobIdRef.current !== jobId) return;
+      setSpaceScanResult(result);
+      if (!result.cancelled && /^[A-Za-z]:\\$/.test(result.root)) {
+        const snapshots = readSpaceScanSnapshots();
+        snapshots[result.root.toLocaleLowerCase()] = snapshotForSpaceScan(result);
+        localStorage.setItem(SPACE_SCAN_SNAPSHOTS_KEY, JSON.stringify(snapshots));
+      }
+    } catch (error) {
+      if (spaceScanJobIdRef.current === jobId) setSpaceScanError(String(error));
+    } finally {
+      if (spaceScanJobIdRef.current === jobId) {
+        spaceScanJobIdRef.current = null;
+        setSpaceScanning(false);
+      }
+    }
+  }
+
+  function cancelSpaceScan() {
+    const jobId = spaceScanJobIdRef.current;
+    if (jobId) void invoke("cancel_space_scan", { jobId }).catch(() => undefined);
+  }
+
+  async function startDuplicateScan() {
+    const previous = duplicateScanJobIdRef.current;
+    if (previous) await invoke("cancel_duplicate_scan", { jobId: previous }).catch(() => undefined);
+    const jobId = crypto.randomUUID();
+    duplicateScanJobIdRef.current = jobId;
+    setDuplicateScanning(true);
+    setDuplicateResult(null);
+    setDuplicateError(null);
+    setDuplicateCleanupSelected(new Set());
+    setDuplicateCleanupConfirmOpen(false);
+    setDuplicateCleanupAcknowledged(false);
+    setDuplicateCleanupMessage(null);
+    setDuplicateFilterQuery("");
+    setDuplicateSizeFilter("all");
+    setDuplicateTypeFilter("all");
+    setDuplicateProgress({ jobId, phase: "scanning", scannedFiles: 0, candidateFiles: 0, processedBytes: 0, currentPath: spaceScanRoot });
+    try {
+      const result = await invoke<DuplicateScanResult>("scan_duplicate_files", { request: { jobId, root: spaceScanRoot, minimumSize: 1024 * 1024 } });
+      if (duplicateScanJobIdRef.current === jobId) setDuplicateResult(result);
+    } catch (error) {
+      if (duplicateScanJobIdRef.current === jobId) setDuplicateError(String(error));
+    } finally {
+      if (duplicateScanJobIdRef.current === jobId) {
+        duplicateScanJobIdRef.current = null;
+        setDuplicateScanning(false);
+      }
+    }
+  }
+
+  function cancelDuplicateScan() {
+    const jobId = duplicateScanJobIdRef.current;
+    if (jobId) void invoke("cancel_duplicate_scan", { jobId }).catch(() => undefined);
+  }
+
+  function toggleDuplicateCleanupItem(group: DuplicateGroup, path: string) {
+    setDuplicateCleanupMessage(null);
+    setDuplicateCleanupSelected((current) => {
+      const next = new Set(current);
+      if (next.has(path)) {
+        next.delete(path);
+        return next;
+      }
+      const selectedInGroup = group.files.filter((item) => next.has(item.path)).length;
+      if (selectedInGroup >= group.files.length - 1) {
+        setDuplicateCleanupMessage(language === "zh-CN" ? "每组必须至少保留一份；不能把这一组全部选中。" : "At least one copy must remain in every group.");
+        return current;
+      }
+      next.add(path);
+      return next;
+    });
+    setDuplicateCleanupConfirmOpen(false);
+    setDuplicateCleanupAcknowledged(false);
+  }
+
+  function resetDuplicateSelectionForFilter() {
+    setDuplicateCleanupSelected(new Set());
+    setDuplicateCleanupConfirmOpen(false);
+    setDuplicateCleanupAcknowledged(false);
+    setDuplicateCleanupMessage(null);
+  }
+
+  function changeDuplicateFilterQuery(value: string) {
+    setDuplicateFilterQuery(value);
+    resetDuplicateSelectionForFilter();
+  }
+
+  function changeDuplicateSizeFilter(value: DuplicateSizeFilter) {
+    setDuplicateSizeFilter(value);
+    resetDuplicateSelectionForFilter();
+  }
+
+  function changeDuplicateTypeFilter(value: DuplicateTypeFilter) {
+    setDuplicateTypeFilter(value);
+    resetDuplicateSelectionForFilter();
+  }
+
+  async function confirmDuplicateCleanup() {
+    const result = duplicateResult;
+    if (!result || !duplicateCleanupAcknowledged || !duplicateCleanupSelected.size) return;
+    const groups = result.groups.flatMap((group) => {
+      const recyclePaths = group.files.filter((item) => duplicateCleanupSelected.has(item.path)).map((item) => item.path);
+      const keepPath = group.files.find((item) => !duplicateCleanupSelected.has(item.path))?.path;
+      return recyclePaths.length && keepPath ? [{ keepPath, recyclePaths }] : [];
+    });
+    if (!groups.length) return;
+    const selectedLookup = new Set(duplicateCleanupSelected);
+    setDuplicateCleanupBusy(true);
+    setDuplicateError(null);
+    setDuplicateCleanupMessage(language === "zh-CN" ? "正在重新校验所选文件的完整内容…" : "Re-verifying the full contents of selected files…");
+    try {
+      const operationResult = await invoke<FileOperationResult>("recycle_verified_duplicates", { request: { root: result.root, groups } });
+      if (operationResult.undo) pushUndo(operationResult.undo, language === "zh-CN" ? `清理重复文件 ${operationResult.completed} 项` : `Clean up ${operationResult.completed} duplicate(s)`);
+      const failed = new Set(operationResult.issues.map((issue) => issue.path.toLocaleLowerCase()));
+      const removed = new Set([...selectedLookup].filter((path) => !failed.has(path.toLocaleLowerCase())).map((path) => path.toLocaleLowerCase()));
+      setDuplicateResult((current) => {
+        if (!current) return current;
+        const groups = current.groups.flatMap((group) => {
+          const files = group.files.filter((item) => !removed.has(item.path.toLocaleLowerCase()));
+          if (files.length < 2) return [];
+          return [{ ...group, files, reclaimableBytes: group.fileSize * (files.length - 1) }];
+        });
+        return { ...current, groups, reclaimableBytes: groups.reduce((sum, group) => sum + group.reclaimableBytes, 0) };
+      });
+      setDuplicateCleanupSelected(new Set());
+      setDuplicateCleanupConfirmOpen(false);
+      setDuplicateCleanupAcknowledged(false);
+      setDuplicateCleanupMessage(operationResult.issues.length
+        ? (language === "zh-CN" ? `已移入回收站 ${operationResult.completed} 个文件；${operationResult.issues.length} 个文件被跳过。` : `${operationResult.completed} file(s) recycled; ${operationResult.issues.length} skipped.`)
+        : (language === "zh-CN" ? `已将 ${operationResult.completed} 个经重新校验的重复文件移入回收站，可通过撤销恢复。` : `${operationResult.completed} re-verified duplicate(s) moved to the Recycle Bin and can be undone.`));
+    } catch (error) {
+      setDuplicateError(String(error));
+      setDuplicateCleanupMessage(null);
+    } finally {
+      setDuplicateCleanupBusy(false);
+    }
+  }
+
+  function closeSpaceHealth() {
+    cancelSpaceScan();
+    cancelDuplicateScan();
+    setSpaceHealthOpen(false);
+  }
+
+  async function openSpaceScanItem(item: SpaceScanItem) {
+    closeSpaceHealth();
+    const target = item.isDirectory ? item.path : parentDirectory(item.path);
+    const restoreState = !item.isDirectory && activeTab ? { ...activeTab, path: target, scrollTop: 0, selectedPaths: [item.path] } : null;
+    await browse(target, activeTabId, true, restoreState);
+  }
+
+  function drillIntoSpaceDirectory(item: SpaceScanItem) {
+    if (!item.isDirectory || spaceScanning) return;
+    void startSpaceScan(item.path);
+  }
+
+  function scanParentSpaceDirectory() {
+    if (spaceScanning || spaceScanRoot.toLocaleLowerCase() === spaceScanDrive.toLocaleLowerCase()) return;
+    const parent = parentDirectory(spaceScanRoot);
+    void startSpaceScan(parent.length < spaceScanDrive.length ? spaceScanDrive : parent);
+  }
+
+  function showSpaceAdvice(category: SpaceScanCategory) {
+    setSpaceAdviceCategoryId(category.id);
+    setSpaceCleanupPreview(null);
+    setSpaceCleanupSelected(new Set());
+    setSpaceCleanupAge("all");
+    setSpaceCleanupConfirmOpen(false);
+    setSpaceCleanupAcknowledged(false);
+    setSpaceCleanupMessage(null);
+    setSpaceCleanupError(null);
+  }
+
+  async function prepareSpaceCleanup(category: SpaceScanCategory) {
+    showSpaceAdvice(category);
+    setSpaceCleanupLoading(true);
+    try {
+      const preview = await invoke<SpaceCleanupPreview>("preview_space_cleanup", { root: spaceScanRoot, categoryId: category.id });
+      setSpaceCleanupPreview(preview);
+    } catch (error) {
+      setSpaceCleanupError(String(error));
+    } finally {
+      setSpaceCleanupLoading(false);
+    }
+  }
+
+  function toggleSpaceCleanupItem(path: string) {
+    setSpaceCleanupSelected((current) => {
+      const next = new Set(current);
+      if (next.has(path)) next.delete(path); else next.add(path);
+      return next;
+    });
+    setSpaceCleanupConfirmOpen(false);
+    setSpaceCleanupAcknowledged(false);
+  }
+
+  function changeSpaceCleanupAge(age: SpaceCleanupAge) {
+    setSpaceCleanupAge(age);
+    setSpaceCleanupSelected(new Set());
+    setSpaceCleanupConfirmOpen(false);
+    setSpaceCleanupAcknowledged(false);
+  }
+
+  async function revealSpaceCleanupItem(path: string) {
+    try {
+      await invoke("reveal_in_explorer", { path });
+    } catch (error) {
+      setSpaceCleanupError(String(error));
+    }
+  }
+
+  async function confirmSpaceCleanup() {
+    const preview = spaceCleanupPreview;
+    if (!preview || !spaceCleanupAcknowledged || !spaceCleanupSelected.size) return;
+    const selectedPaths = [...spaceCleanupSelected];
+    const selectedLookup = new Set(selectedPaths.map((path) => path.toLocaleLowerCase()));
+    setSpaceCleanupLoading(true);
+    setSpaceCleanupError(null);
+    try {
+      const result = await invoke<FileOperationResult>("recycle_space_cleanup_paths", { root: preview.root, categoryId: preview.categoryId, paths: selectedPaths });
+      if (result.undo) pushUndo(result.undo, language === "zh-CN" ? `安全清理 ${result.completed} 个文件` : `Safe cleanup of ${result.completed} file(s)`);
+      const failed = new Set(result.issues.map((issue) => issue.path.toLocaleLowerCase()));
+      const removed = preview.candidates.filter((item) => selectedLookup.has(item.path.toLocaleLowerCase()) && !failed.has(item.path.toLocaleLowerCase()));
+      const removedBytes = removed.reduce((sum, item) => sum + item.size, 0);
+      const removedPaths = new Set(removed.map((item) => item.path.toLocaleLowerCase()));
+      setSpaceCleanupPreview((current) => current ? { ...current, totalBytes: Math.max(0, current.totalBytes - removedBytes), totalFiles: Math.max(0, current.totalFiles - removed.length), candidates: current.candidates.filter((item) => !removedPaths.has(item.path.toLocaleLowerCase())) } : current);
+      setSpaceScanResult((current) => current ? { ...current, categories: current.categories.map((category) => category.id === preview.categoryId ? { ...category, size: Math.max(0, category.size - removedBytes), fileCount: Math.max(0, category.fileCount - removed.length) } : category) } : current);
+      setSpaceCleanupSelected(new Set());
+      setSpaceCleanupConfirmOpen(false);
+      setSpaceCleanupAcknowledged(false);
+      setSpaceCleanupMessage(result.issues.length
+        ? (language === "zh-CN" ? `已移入回收站 ${result.completed} 个文件；${result.issues.length} 个文件因占用或权限问题被跳过。` : `${result.completed} file(s) recycled; ${result.issues.length} skipped because of access or file-use issues.`)
+        : (language === "zh-CN" ? `已将 ${result.completed} 个文件移入回收站，仍可通过撤销恢复。` : `${result.completed} file(s) moved to the Recycle Bin and can still be restored with Undo.`));
+    } catch (error) {
+      setSpaceCleanupError(String(error));
+    } finally {
+      setSpaceCleanupLoading(false);
+    }
+  }
+
+  function renderSpaceHealth() {
+    const drives = locations.filter((location) => /^[A-Za-z]:\\$/.test(location.path) && location.isAvailable);
+    const result = spaceScanResult;
+    const usedBytes = result ? Math.max(0, result.totalSpace - result.availableSpace) : 0;
+    const usedPercent = result?.totalSpace ? Math.min(100, usedBytes / result.totalSpace * 100) : 0;
+    const availableDelta = result && spacePreviousSnapshot ? result.availableSpace - spacePreviousSnapshot.availableSpace : null;
+    const scanningSubdirectory = spaceScanRoot.toLocaleLowerCase() !== spaceScanDrive.toLocaleLowerCase();
+    const largestDirectorySize = Math.max(1, result?.largestDirectories[0]?.size ?? 1);
+    const largestFileSize = Math.max(1, result?.largestFiles[0]?.size ?? 1);
+    const riskLabel = (risk: SpaceScanCategory["risk"]) => risk === "safe" ? text.safeToReview : risk === "review" ? text.confirmBeforeAction : text.protectedItem;
+    const activeCategory = result?.categories.find((category) => category.id === spaceAdviceCategoryId) ?? null;
+    const activeAdvice = activeCategory ? spaceCategoryAdvice(activeCategory.id, language) : null;
+    const cleanupAgeDays = spaceCleanupAge === "all" ? 0 : Number(spaceCleanupAge);
+    const cleanupAgeCutoff = cleanupAgeDays ? Math.floor(Date.now() / 1000) - cleanupAgeDays * 86400 : 0;
+    const filteredCleanupCandidates = spaceCleanupPreview?.candidates.filter((item) => !cleanupAgeCutoff || (!!item.modifiedUnixSeconds && item.modifiedUnixSeconds <= cleanupAgeCutoff)) ?? [];
+    const filteredCleanupBytes = filteredCleanupCandidates.reduce((sum, item) => sum + item.size, 0);
+    const selectedCleanupBytes = spaceCleanupPreview?.candidates.reduce((sum, item) => sum + (spaceCleanupSelected.has(item.path) ? item.size : 0), 0) ?? 0;
+    const selectedDuplicateBytes = duplicateResult?.groups.reduce((sum, group) => sum + group.files.reduce((groupSum, item) => groupSum + (duplicateCleanupSelected.has(item.path) ? item.size : 0), 0), 0) ?? 0;
+    const duplicateMinimumSize = duplicateSizeFilter === "10mb" ? 10 * 1024 * 1024 : duplicateSizeFilter === "100mb" ? 100 * 1024 * 1024 : duplicateSizeFilter === "1gb" ? 1024 * 1024 * 1024 : 0;
+    const duplicateFilterNeedle = duplicateFilterQuery.trim().toLocaleLowerCase();
+    const filteredDuplicateGroups = duplicateResult?.groups.filter((group) => group.fileSize >= duplicateMinimumSize && group.files.some((item) => (!duplicateFilterNeedle || item.name.toLocaleLowerCase().includes(duplicateFilterNeedle) || item.path.toLocaleLowerCase().includes(duplicateFilterNeedle)) && duplicateFileMatchesType(item, duplicateTypeFilter))) ?? [];
+    return <div className="settings-backdrop space-health-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeSpaceHealth(); }}>
+      <section className="space-health-panel" role="dialog" aria-modal="true" aria-labelledby="space-health-title">
+        <header>
+          <div><h2 id="space-health-title">{text.spaceHealthTitle}</h2><p>{text.spaceHealthIntro}</p></div>
+          <button className="settings-close" aria-label={text.close} onClick={closeSpaceHealth}>×</button>
+        </header>
+        <div className="space-health-controls">
+          <div className="space-drive-picker" aria-label={text.locations}>{drives.map((drive) => <button key={drive.path} className={spaceScanDrive.toLocaleLowerCase() === drive.path.toLocaleLowerCase() ? "active" : ""} disabled={spaceScanning || duplicateScanning} onClick={() => { setSpaceScanDrive(drive.path); setSpaceScanRoot(drive.path); setSpaceScanResult(null); setSpacePreviousSnapshot(readSpaceScanSnapshots()[drive.path.toLocaleLowerCase()] ?? null); setSpaceScanError(null); setDuplicateResult(null); setDuplicateError(null); setDuplicateCleanupSelected(new Set()); setDuplicateCleanupMessage(null); }}><strong>{drive.path}</strong><span>{drive.availableSpace !== null ? `${formatSize(drive.availableSpace)} ${text.available}` : "—"}</span></button>)}</div>
+          {spaceScanning ? <button className="space-scan-action secondary" onClick={cancelSpaceScan}>{text.stopScan}</button> : <button className="space-scan-action" disabled={!drives.length} onClick={() => void startSpaceScan()}>{result ? text.rescan : text.startScan}</button>}
+        </div>
+        <div className="space-health-body">
+          {(result || scanningSubdirectory) && <div className="space-scope-bar"><button disabled={!scanningSubdirectory || spaceScanning} onClick={scanParentSpaceDirectory}>←</button><div><span>{language === "zh-CN" ? "扫描范围" : "Scan scope"}</span><strong title={spaceScanRoot}>{spaceScanRoot}</strong></div>{result && <button className="space-open-scope" onClick={() => void openSpaceScanItem({ name: labelForPath(result.root), path: result.root, size: result.scannedBytes, modifiedUnixSeconds: null, isDirectory: true })}>{text.openLocation}</button>}</div>}
+          {spaceScanning && <section className="space-scan-running"><div className="space-scan-running-heading"><strong>{text.scanningSpace}</strong><span>{formatSize(spaceScanProgress?.scannedBytes ?? 0)} · {spaceScanProgress?.scannedFiles ?? 0} {language === "zh-CN" ? "个文件" : "files"}</span></div><div className="space-health-progress indeterminate"><i /></div><small title={spaceScanProgress?.currentPath}>{spaceScanProgress?.currentPath}</small></section>}
+          {spaceScanError && <div className="space-scan-error"><strong>{language === "zh-CN" ? "扫描未完成" : "Scan did not finish"}</strong><span>{spaceScanError}</span></div>}
+          {!result && !spaceScanning && !spaceScanError && <div className="space-health-empty"><SpaceHealthIcon /><strong>{text.noScanYet}</strong><span>{text.scanCoverageHint}</span></div>}
+          {result && <>
+            <section className="space-capacity-card">
+              <div className="space-capacity-heading"><div><strong>{result.root}</strong><span>{formatSize(result.availableSpace)} {text.available} / {formatSize(result.totalSpace)}</span></div><b>{Math.round(usedPercent)}%</b></div>
+              <div className="space-capacity-track"><i style={{ width: `${usedPercent}%` }} /></div>
+              <div className={`space-summary-grid ${availableDelta !== null ? "with-comparison" : ""}`}><article><span>{language === "zh-CN" ? "磁盘已用" : "Disk used"}</span><strong>{formatSize(usedBytes)}</strong></article><article><span>{text.scanCaptured}</span><strong>{formatSize(result.scannedBytes)}</strong><small>{result.scannedFiles.toLocaleString()} {language === "zh-CN" ? "个文件" : "files"}</small></article><article><span>{text.inaccessible}</span><strong>{result.issues.toLocaleString()}</strong><small>{result.skippedReparsePoints.toLocaleString()} {language === "zh-CN" ? "个联接/占位点已跳过" : "junctions/placeholders skipped"}</small></article>{availableDelta !== null && <article className={availableDelta >= 0 ? "space-change-positive" : "space-change-negative"}><span>{language === "zh-CN" ? "距上次体检" : "Since last scan"}</span><strong>{availableDelta >= 0 ? "+" : "−"}{formatSize(Math.abs(availableDelta))}</strong><small>{availableDelta >= 0 ? (language === "zh-CN" ? "可用空间增加" : "more free space") : (language === "zh-CN" ? "可用空间减少" : "less free space")}</small></article>}</div>
+              <p>{text.scanCoverageHint}{result.cancelled ? ` · ${language === "zh-CN" ? "本次扫描已提前停止，当前显示部分结果。" : "This scan was stopped early; partial results are shown."}` : ""}</p>
+            </section>
+            <section className="duplicate-diagnostic">
+              <header><div><strong>{language === "zh-CN" ? "重复文件诊断" : "Duplicate file diagnosis"}</strong><span>{language === "zh-CN" ? "仅检查 1 MB 以上文件；完整哈希确认，不会自动选择或删除" : "Files over 1 MB only; full-hash verification with no automatic selection or deletion"}</span></div>{duplicateScanning ? <button className="secondary" onClick={cancelDuplicateScan}>{text.stopScan}</button> : <button disabled={spaceScanning} onClick={() => void startDuplicateScan()}>{duplicateResult ? (language === "zh-CN" ? "重新查重" : "Scan again") : (language === "zh-CN" ? "开始查重" : "Find duplicates")}</button>}</header>
+              {duplicateScanning && <div className="duplicate-running"><div><strong>{duplicateProgress?.phase === "verifying" ? (language === "zh-CN" ? "正在完整校验…" : "Verifying full contents…") : duplicateProgress?.phase === "fingerprint" ? (language === "zh-CN" ? "正在筛选候选…" : "Filtering candidates…") : (language === "zh-CN" ? "正在扫描文件…" : "Scanning files…")}</strong><span>{(duplicateProgress?.scannedFiles ?? 0).toLocaleString()} {language === "zh-CN" ? "个文件" : "files"} · {(duplicateProgress?.candidateFiles ?? 0).toLocaleString()} {language === "zh-CN" ? "个候选" : "candidates"}</span></div><div className="space-health-progress indeterminate"><i /></div><small title={duplicateProgress?.currentPath}>{duplicateProgress?.currentPath}</small></div>}
+              {duplicateError && <div className="space-scan-error"><strong>{language === "zh-CN" ? "重复文件诊断未完成" : "Duplicate diagnosis did not finish"}</strong><span>{duplicateError}</span></div>}
+              {duplicateResult && <div className="duplicate-results">
+                <div className="duplicate-summary"><article><span>{language === "zh-CN" ? "确认重复组" : "Verified groups"}</span><strong>{duplicateResult.groups.length.toLocaleString()}</strong></article><article><span>{language === "zh-CN" ? "可复核空间" : "Reviewable space"}</span><strong>{formatSize(duplicateResult.reclaimableBytes)}</strong></article><article><span>{language === "zh-CN" ? "已检查" : "Scanned"}</span><strong>{duplicateResult.scannedFiles.toLocaleString()}</strong><small>{duplicateResult.issues ? `${duplicateResult.issues} ${language === "zh-CN" ? "个无法读取" : "unreadable"}` : (language === "zh-CN" ? "无读取错误" : "No read errors")}</small></article></div>
+                <p>{language === "zh-CN" ? "“可复核空间”按每组保留 1 份估算。“建议保留”只根据目录性质、修改时间和路径长度给出参考，不会自动勾选；每组始终至少保留一份。" : "Reviewable space assumes one copy is retained. Suggested keeps only consider folder type, modified date, and path length; nothing is preselected and every group keeps at least one copy."}</p>
+                {duplicateResult.truncated && <p className="space-cleanup-note">{language === "zh-CN" ? "重复组很多，当前仅显示占用最大的 500 组。" : "Many groups were found; only the 500 largest are shown."}</p>}
+                {!!duplicateResult.groups.length && <div className="duplicate-filter-bar"><input value={duplicateFilterQuery} onChange={(event) => changeDuplicateFilterQuery(event.target.value)} placeholder={language === "zh-CN" ? "筛选文件名、文件夹或完整路径" : "Filter name, folder, or full path"} /><select value={duplicateTypeFilter} onChange={(event) => changeDuplicateTypeFilter(event.target.value as DuplicateTypeFilter)} aria-label={language === "zh-CN" ? "文件类型" : "File type"}><option value="all">{language === "zh-CN" ? "所有类型" : "All types"}</option><option value="images">{text.images}</option><option value="videos">{text.videos}</option><option value="audio">{text.audio}</option><option value="documents">{text.documents}</option><option value="archives">{text.archives}</option><option value="other">{language === "zh-CN" ? "其他类型" : "Other"}</option></select><div>{(["all", "10mb", "100mb", "1gb"] as DuplicateSizeFilter[]).map((size) => <button key={size} className={duplicateSizeFilter === size ? "active" : ""} onClick={() => changeDuplicateSizeFilter(size)}>{size === "all" ? (language === "zh-CN" ? "全部大小" : "All sizes") : `${size.replace("mb", " MB").replace("gb", " GB")}+`}</button>)}</div><span>{filteredDuplicateGroups.length.toLocaleString()} / {duplicateResult.groups.length.toLocaleString()} {language === "zh-CN" ? "组" : "groups"}</span></div>}
+                {duplicateCleanupMessage && <div className="duplicate-cleanup-message">{duplicateCleanupMessage}</div>}
+                <div className="duplicate-groups">{filteredDuplicateGroups.length ? filteredDuplicateGroups.map((group) => {
+                  const suggested = suggestedDuplicateKeep(group);
+                  return <details key={`${group.signature}-${group.fileSize}`}><summary><span><strong>{formatSize(group.fileSize)} × {group.files.length}</strong><small>{language === "zh-CN" ? `可复核 ${formatSize(group.reclaimableBytes)}` : `${formatSize(group.reclaimableBytes)} reviewable`} · #{group.signature}</small></span><b>›</b></summary><div>{group.files.map((item) => <div className={`duplicate-file-row ${suggested?.path === item.path ? "suggested-keep" : ""}`} key={item.path} title={item.path}><label><input type="checkbox" checked={duplicateCleanupSelected.has(item.path)} disabled={duplicateCleanupBusy} onChange={() => toggleDuplicateCleanupItem(group, item.path)} /><span><strong>{item.name}{suggested?.path === item.path && <b className="keep-suggestion">{language === "zh-CN" ? "建议保留" : "Suggested keep"}</b>}</strong><small>{item.path}</small>{suggested?.path === item.path && <i>{duplicateKeepReason(group, item, language)}</i>}</span></label><em>{formatDate(item.modifiedUnixSeconds, language)}</em><button aria-label={text.openLocation} title={text.openLocation} onClick={() => void openSpaceScanItem(item)}>↗</button></div>)}</div></details>;
+                }) : <span className="space-list-empty">{duplicateResult.groups.length ? (language === "zh-CN" ? "当前筛选下没有重复文件组。" : "No duplicate groups match the current filters.") : (language === "zh-CN" ? "没有发现经过完整内容校验的重复文件。" : "No duplicates were confirmed by full-content verification.")}</span>}</div>
+                {!!duplicateResult.groups.length && <footer className="duplicate-cleanup-footer"><div><strong>{duplicateCleanupSelected.size.toLocaleString()} {language === "zh-CN" ? "个待清理" : "selected"}</strong><span>{formatSize(selectedDuplicateBytes)} · {language === "zh-CN" ? "未勾选的文件将保留" : "Unchecked copies will be retained"}</span></div><button disabled={!duplicateCleanupSelected.size || duplicateCleanupBusy} onClick={() => { setDuplicateCleanupConfirmOpen(true); setDuplicateCleanupAcknowledged(false); }}>{language === "zh-CN" ? "复核并清理" : "Review cleanup"}</button></footer>}
+                {duplicateCleanupConfirmOpen && <div className="space-cleanup-confirm duplicate-cleanup-confirm"><strong>{language === "zh-CN" ? "重新校验后移入回收站" : "Re-verify, then recycle"}</strong><p>{language === "zh-CN" ? `将重新读取并比对 ${duplicateCleanupSelected.size} 个文件的完整内容；只有仍与保留副本完全一致的文件才会移入 Windows 回收站。` : `The full contents of ${duplicateCleanupSelected.size} selected file(s) will be read again. Only files still identical to a retained copy will be moved to the Windows Recycle Bin.`}</p><label><input type="checkbox" checked={duplicateCleanupAcknowledged} onChange={(event) => setDuplicateCleanupAcknowledged(event.target.checked)} /><span>{language === "zh-CN" ? "我已逐项查看文件名与路径，并确认每组未勾选的副本应当保留。" : "I reviewed every name and path and confirm the unchecked copy in each group should be retained."}</span></label><div><button disabled={duplicateCleanupBusy} onClick={() => setDuplicateCleanupConfirmOpen(false)}>{text.cancel}</button><button className="primary" disabled={!duplicateCleanupAcknowledged || duplicateCleanupBusy} onClick={() => void confirmDuplicateCleanup()}>{duplicateCleanupBusy ? (language === "zh-CN" ? "正在完整校验…" : "Verifying…") : (language === "zh-CN" ? "确认移入回收站" : "Move to Recycle Bin")}</button></div></div>}
+              </div>}
+            </section>
+            <section className="space-category-section">
+              <header><strong>{text.attentionItems}</strong><span>{language === "zh-CN" ? "先看建议，再预检具体文件；不会自动勾选或删除" : "Read advice, preview exact files, then confirm; nothing is preselected"}</span></header>
+              <div className="space-category-grid">{result.categories.length ? result.categories.map((category) => {
+                const previousSize = spacePreviousSnapshot?.categories[category.id];
+                const delta = previousSize === undefined ? null : category.size - previousSize;
+                const advice = spaceCategoryAdvice(category.id, language);
+                return <article key={category.id} className={`risk-${category.risk} ${spaceAdviceCategoryId === category.id ? "active" : ""}`}>
+                  <div><strong>{spaceCategoryLabel(category.id, language)}</strong><span className="space-risk-badge">{riskLabel(category.risk)}</span></div>
+                  <b>{formatSize(category.size)}</b>
+                  <small>{category.fileCount.toLocaleString()} {language === "zh-CN" ? "个文件" : "files"}{delta !== null && delta !== 0 ? ` · ${language === "zh-CN" ? "较上次" : "vs last"} ${delta > 0 ? "+" : "−"}${formatSize(Math.abs(delta))}` : ""}</small>
+                  <p>{advice.summary}</p>
+                  <div className="space-category-actions"><button onClick={() => showSpaceAdvice(category)}>{language === "zh-CN" ? "查看建议" : "View advice"}</button>{advice.cleanable && <button className="cleanup" disabled={spaceCleanupLoading} onClick={() => void prepareSpaceCleanup(category)}>{language === "zh-CN" ? "复核清理" : "Review cleanup"}</button>}</div>
+                </article>;
+              }) : <span className="space-list-empty">{language === "zh-CN" ? "没有发现已知关注项" : "No known items found"}</span>}</div>
+              {activeCategory && activeAdvice && <div className="space-advice-panel">
+                <header><div><strong>{spaceCategoryLabel(activeCategory.id, language)}</strong><span className={`space-risk-badge risk-${activeCategory.risk}`}>{riskLabel(activeCategory.risk)}</span></div><button aria-label={text.close} onClick={() => { setSpaceAdviceCategoryId(null); setSpaceCleanupPreview(null); setSpaceCleanupSelected(new Set()); }}>×</button></header>
+                <div className="space-advice-copy"><article><span>{language === "zh-CN" ? "判断" : "Assessment"}</span><p>{activeAdvice.summary}</p></article><article><span>{language === "zh-CN" ? "建议" : "Recommendation"}</span><p>{activeAdvice.action}</p></article><article><span>{language === "zh-CN" ? "注意" : "Caution"}</span><p>{activeAdvice.caution}</p></article></div>
+                {!activeAdvice.cleanable && <div className="space-advice-protected">{language === "zh-CN" ? "为避免破坏系统或误删个人内容，此类别不提供直接清理按钮。" : "Direct cleanup is unavailable for this category to avoid system damage or personal data loss."}</div>}
+                {activeAdvice.cleanable && !spaceCleanupPreview && !spaceCleanupLoading && <button className="space-prepare-cleanup" onClick={() => void prepareSpaceCleanup(activeCategory)}>{language === "zh-CN" ? "扫描并列出可复核文件" : "Scan and list reviewable files"}</button>}
+                {spaceCleanupLoading && !spaceCleanupPreview && <div className="space-cleanup-loading"><span>{language === "zh-CN" ? "正在生成清理预检清单…" : "Building cleanup preview…"}</span><div className="space-health-progress indeterminate"><i /></div></div>}
+                {spaceCleanupError && <div className="space-scan-error"><strong>{language === "zh-CN" ? "无法完成清理预检" : "Cleanup preview failed"}</strong><span>{spaceCleanupError}</span></div>}
+                {spaceCleanupMessage && <div className="space-cleanup-success">{spaceCleanupMessage}</div>}
+                {spaceCleanupPreview && <div className="space-cleanup-preview">
+                  <header><div><strong>{language === "zh-CN" ? "清理前复核" : "Review before cleanup"}</strong><span>{formatSize(spaceCleanupPreview.totalBytes)} · {spaceCleanupPreview.totalFiles.toLocaleString()} {language === "zh-CN" ? "个匹配文件" : "matching files"}</span></div><div><button onClick={() => setSpaceCleanupSelected(new Set(filteredCleanupCandidates.map((item) => item.path)))}>{language === "zh-CN" ? "选择当前结果" : "Select filtered"}</button><button onClick={() => setSpaceCleanupSelected(new Set())}>{language === "zh-CN" ? "清除选择" : "Clear"}</button></div></header>
+                  {spaceCleanupPreview.truncated && <p className="space-cleanup-note">{language === "zh-CN" ? `为便于安全复核，仅列出最大的 ${spaceCleanupPreview.candidates.length} 个文件；清理只作用于你明确勾选的文件。` : `For safe review, only the largest ${spaceCleanupPreview.candidates.length} files are shown. Cleanup only affects checked files.`}</p>}
+                  <div className="space-cleanup-filters"><div><span>{language === "zh-CN" ? "按未修改时间" : "Not modified for"}</span>{(["all", "30", "90", "365"] as SpaceCleanupAge[]).map((age) => <button key={age} className={spaceCleanupAge === age ? "active" : ""} onClick={() => changeSpaceCleanupAge(age)}>{age === "all" ? (language === "zh-CN" ? "全部" : "All") : age === "365" ? (language === "zh-CN" ? "1 年" : "1 year") : `${age} ${language === "zh-CN" ? "天" : "days"}`}</button>)}</div><strong>{filteredCleanupCandidates.length.toLocaleString()} {language === "zh-CN" ? "项" : "items"} · {formatSize(filteredCleanupBytes)}</strong></div>
+                  <div className="space-cleanup-list">{filteredCleanupCandidates.length ? filteredCleanupCandidates.map((item) => <div className="space-cleanup-row" key={item.path} title={item.path}><label><input type="checkbox" checked={spaceCleanupSelected.has(item.path)} onChange={() => toggleSpaceCleanupItem(item.path)} /><span><strong>{item.name}</strong><small>{item.path}</small><em>{language === "zh-CN" ? "修改于" : "Modified"} {formatDate(item.modifiedUnixSeconds, language)}</em></span></label><b>{formatSize(item.size)}</b><button aria-label={text.openLocation} title={text.openLocation} onClick={() => void revealSpaceCleanupItem(item.path)}>↗</button></div>) : <span className="space-list-empty">{language === "zh-CN" ? "当前筛选下没有文件。" : "No files match this filter."}</span>}</div>
+                  <footer><div><strong>{spaceCleanupSelected.size.toLocaleString()} {language === "zh-CN" ? "个已选" : "selected"}</strong><span>{formatSize(selectedCleanupBytes)}</span></div><button disabled={!spaceCleanupSelected.size || spaceCleanupLoading} onClick={() => { setSpaceCleanupConfirmOpen(true); setSpaceCleanupAcknowledged(false); }}>{language === "zh-CN" ? "复核并继续" : "Review and continue"}</button></footer>
+                  {spaceCleanupConfirmOpen && <div className="space-cleanup-confirm"><strong>{language === "zh-CN" ? "最后确认" : "Final confirmation"}</strong><p>{language === "zh-CN" ? `将把你选择的 ${spaceCleanupSelected.size} 个文件（${formatSize(selectedCleanupBytes)}）移入 Windows 回收站，不会永久删除。` : `${spaceCleanupSelected.size} selected file(s) (${formatSize(selectedCleanupBytes)}) will be moved to the Windows Recycle Bin, not permanently deleted.`}</p><label><input type="checkbox" checked={spaceCleanupAcknowledged} onChange={(event) => setSpaceCleanupAcknowledged(event.target.checked)} /><span>{language === "zh-CN" ? "我已查看上方文件名、路径和大小，并确认清理这些内容。" : "I reviewed the names, paths, and sizes above and confirm these items."}</span></label><div><button onClick={() => setSpaceCleanupConfirmOpen(false)}>{text.cancel}</button><button className="primary" disabled={!spaceCleanupAcknowledged || spaceCleanupLoading} onClick={() => void confirmSpaceCleanup()}>{spaceCleanupLoading ? (language === "zh-CN" ? "正在处理…" : "Processing…") : (language === "zh-CN" ? "确认移入回收站" : "Move to Recycle Bin")}</button></div></div>}
+                </div>}
+              </div>}
+            </section>
+            <div className="space-ranking-grid">
+              <section className="space-ranking"><header><strong>{text.largeDirectories}</strong><span>{language === "zh-CN" ? "点击目录继续向下检查" : "Click a folder to drill down"}</span></header><div className="space-ranking-list">{result.largestDirectories.slice(0, 16).map((item) => <button key={item.path} title={language === "zh-CN" ? `继续检查 ${item.path}` : `Scan inside ${item.path}`} onClick={() => drillIntoSpaceDirectory(item)}><span className="space-rank-icon"><FolderGlyph /></span><span className="space-rank-copy"><strong>{item.name}</strong><small>{item.path}</small><i><b style={{ width: `${Math.max(2, item.size / largestDirectorySize * 100)}%` }} /></i></span><em>{formatSize(item.size)} <b>›</b></em></button>)}</div></section>
+              <section className="space-ranking"><header><strong>{text.largeFilesTitle}</strong><span>{language === "zh-CN" ? "点击可在 Flow Files 中定位" : "Click to locate in Flow Files"}</span></header><div className="space-ranking-list">{result.largestFiles.slice(0, 16).map((item) => <button key={item.path} title={`${text.openLocation}: ${item.path}`} onClick={() => void openSpaceScanItem(item)}><span className="space-rank-file">▤</span><span className="space-rank-copy"><strong>{item.name}</strong><small>{parentDirectory(item.path)}</small><i><b style={{ width: `${Math.max(2, item.size / largestFileSize * 100)}%` }} /></i></span><em>{formatSize(item.size)}</em></button>)}</div></section>
+            </div>
+          </>}
+        </div>
+      </section>
+    </div>;
+  }
+
+  function renderSearchPanel() {
+    const canSave = !!query.trim() || searchKind !== "all" || searchDate !== "any" || searchSize !== "any";
+    return <div className="search-panel">
+      <strong>{text.searchFilters}</strong>
+      <label><span>{text.type}</span><select value={searchKind} onChange={(event) => setSearchKind(event.target.value as SearchKind)}><option value="all">{text.anyType}</option><option value="folders">{text.foldersOnly}</option><option value="images">{text.images}</option><option value="documents">{text.documents}</option><option value="videos">{text.videos}</option><option value="audio">{text.audio}</option><option value="archives">{text.archives}</option></select></label>
+      <label><span>{text.modified}</span><select value={searchDate} onChange={(event) => setSearchDate(event.target.value as SearchDate)}><option value="any">{text.anyDate}</option><option value="day">{text.pastDay}</option><option value="week">{text.pastWeek}</option><option value="month">{text.pastMonth}</option><option value="year">{text.pastYear}</option></select></label>
+      <label><span>{text.size}</span><select value={searchSize} onChange={(event) => setSearchSize(event.target.value as SearchSize)}><option value="any">{text.anySize}</option><option value="small">{text.smallFiles}</option><option value="medium">{text.mediumFiles}</option><option value="large">{text.largeFiles}</option></select></label>
+      <div className="search-panel-actions"><button disabled={!canSave} onClick={saveCurrentSearch}>{text.saveSearch}</button><button className="search-panel-run" onClick={() => void startDeepSearch()}>{text.startSearch}</button></div>
+      {savedSearches.length > 0 && <section className="search-quick-section"><header><span>{text.savedSearches}</span></header><div className="search-quick-list">{savedSearches.map((item) => <div className="search-quick-item" key={item.id}><button title={item.name} onClick={() => void startDeepSearch(item)}>{item.name}</button><button aria-label={text.removeSavedSearch} title={text.removeSavedSearch} onClick={() => removeSavedSearch(item.id)}>×</button></div>)}</div></section>}
+      <section className="search-quick-section"><header><span>{text.recentSearches}</span>{searchHistory.length > 0 && <button onClick={clearSearchHistory}>{text.clearHistory}</button>}</header>{searchHistory.length > 0 ? <div className="search-quick-list history">{searchHistory.map((item) => <button key={`${item.usedAt}-${item.query}-${item.kind}-${item.date}-${item.size}`} title={searchProfileLabel(item)} onClick={() => void startDeepSearch(item)}>{searchProfileLabel(item)}</button>)}</div> : <small>{text.noSearchHistory}</small>}</section>
+    </div>;
+  }
+
+  return <main className="file-app" onPointerLeave={() => void startExternalFileDrag()}>
+    <header className="topbar">
+      <div className="brand"><img className="brand-mark" src={brandIcon} alt="" /><span><strong>Flow Files</strong><small>{text.subtitle}</small></span></div>
+      <div className="top-actions"><button className="space-health-button" onClick={openSpaceHealth} title={text.spaceHealth}><SpaceHealthIcon /><span>{text.spaceHealth}</span></button><div className="menu-anchor top-new-menu"><button className="top-new-button" aria-expanded={openMenu === "new"} onClick={() => toggleToolbarMenu("new")} disabled={!listing || !!operation || searchResults !== null}><span>＋ {text.newItem}</span><ChevronIcon /></button>{openMenu === "new" && <div className="toolbar-menu new-menu" role="menu"><button onClick={() => void createItem("folder")}><span>{text.newFolder}</span></button><button onClick={() => void createItem("text")}><span>{text.newTextFile}</span></button><button onClick={() => void createItem("markdown")}><span>{text.newMarkdownFile}</span></button></div>}</div><div className="menu-anchor terminal-launch-menu"><button className="top-new-button" aria-expanded={openMenu === "terminal"} onClick={() => toggleToolbarMenu("terminal")} disabled={!listing}><span>{text.terminal}</span><ChevronIcon /></button>{openMenu === "terminal" && <div className="toolbar-menu" role="menu"><button onClick={() => { setOpenMenu(null); void openTerminalAt(); }}><span>{text.plainTerminal}</span></button><button onClick={() => { setOpenMenu(null); void openTerminalAt(listing?.path, "claude"); }}><span>{text.claudeCode}</span><b>›_</b></button></div>}</div><button className={`task-center-button ${operationTasks.some((task) => task.status === "running" || task.status === "paused" || task.status === "queued") ? "busy" : ""}`} onClick={() => setTaskCenterOpen((open) => !open)} title={text.tasks}><span>⇅</span>{operationTasks.filter((task) => task.status === "running" || task.status === "paused" || task.status === "queued").length > 0 && <b>{operationTasks.filter((task) => task.status === "running" || task.status === "paused" || task.status === "queued").length}</b>}</button><button className="settings-button" aria-label={text.settings} title={text.settings} onClick={() => setSettingsOpen(true)}><SettingsIcon /></button></div>
+    </header>
+    <nav className="tabbar" aria-label="Folder tabs">
+      {tabs.map((tab) => <button key={tab.id} data-tab-id={tab.id} data-drop-path={tab.path} className={`tab ${tab.id === activeTabId ? "active" : ""} ${tab.pinned ? "pinned" : ""} ${dragTarget === tab.path ? "drop-target" : ""} ${draggedTabId === tab.id ? "dragging" : ""} ${unavailablePaths.has(tab.path.toLocaleLowerCase()) ? "offline" : ""} ${tabDropId === tab.id ? `reorder-${tabDropSide}` : ""}`} title={unavailablePaths.has(tab.path.toLocaleLowerCase()) ? `${tab.path} · ${language === "zh-CN" ? "已断开，点击重试" : "Disconnected; click to retry"}` : tab.path} onPointerDown={(event) => armTabReorder(tab.id, event)} onClick={(event) => { if (suppressTabClickRef.current) { event.preventDefault(); event.stopPropagation(); return; } void activateTab(tab); }} onContextMenu={(event) => openTabContextMenu(tab.id, event)} onMouseDown={(event) => { if (event.button === 1) { event.preventDefault(); closeTab(event, tab.id); } }}>{tab.pinned && <b className="tab-pin" aria-label={text.unpinTab}>⌖</b>}<span>{localizedLocation(tab.label, language)}</span>{tabs.length > 1 && !tab.pinned && <i className="tab-close" onClick={(event) => closeTab(event, tab.id)}>×</i>}</button>)}
+      <button className="tab add-tab" title="Ctrl+T" onClick={() => openNewTab()}>＋</button>
+    </nav>
+    <section className="workspace">
+      <aside className="sidebar">
+        {favorites.length > 0 && <><p>{text.favorites}</p><div className="favorite-sections"><datalist id="favorite-groups">{favoriteSections.filter(([group]) => group).map(([group]) => <option value={group} key={group} />)}</datalist>{favoriteSections.map(([group, items]) => { const groupKey = group.toLocaleLowerCase(); const collapsed = collapsedFavoriteGroups.has(groupKey); return <section className="favorite-section" key={group || "ungrouped"}><button className="favorite-group-heading" aria-expanded={!collapsed} onClick={() => toggleFavoriteGroup(group)}><i>›</i><span>{group || (language === "zh-CN" ? "未分组" : "Ungrouped")}</span><b>{items.length}</b></button>{!collapsed && <div className="favorite-list">{items.map((favorite) => { const editing = favoriteEditingPath === favorite.path; return <div data-drop-path={favorite.path} className={`favorite-row ${editing ? "editing" : ""} ${listing?.path.toLocaleLowerCase() === favorite.path.toLocaleLowerCase() ? "selected" : ""} ${dragTarget === favorite.path ? "drop-target" : ""} ${favoriteDropPath === favorite.path ? "reorder-target" : ""}`} key={favorite.path} onDragOver={(event) => { if (!favoriteDraggingPath) return; event.preventDefault(); event.stopPropagation(); setFavoriteDropPath(favorite.path); }} onDrop={(event) => { if (!favoriteDraggingPath) return; event.preventDefault(); event.stopPropagation(); reorderFavorite(favoriteDraggingPath, favorite.path); setFavoriteDraggingPath(null); setFavoriteDropPath(null); }}><button className="favorite-handle" draggable={!editing} aria-label={language === "zh-CN" ? "拖动排序" : "Drag to reorder"} title={language === "zh-CN" ? "拖动排序，也可拖到其他分组" : "Drag to reorder or move between groups"} onDragStart={(event) => { event.stopPropagation(); event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", favorite.path); setFavoriteDraggingPath(favorite.path); }} onDragEnd={() => { setFavoriteDraggingPath(null); setFavoriteDropPath(null); }}>⋮⋮</button>{editing ? <div className="favorite-editor"><input className="favorite-name-input" autoFocus value={favoriteLabelValue} aria-label={language === "zh-CN" ? "收藏名称" : "Favorite name"} placeholder={language === "zh-CN" ? "名称" : "Name"} onChange={(event) => setFavoriteLabelValue(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") commitFavoriteRename(favorite.path, favoriteLabelValue, favoriteGroupValue); else if (event.key === "Escape") setFavoriteEditingPath(null); }} /><input className="favorite-name-input" list="favorite-groups" value={favoriteGroupValue} aria-label={language === "zh-CN" ? "收藏分组" : "Favorite group"} placeholder={language === "zh-CN" ? "分组（可选）" : "Group (optional)"} onChange={(event) => setFavoriteGroupValue(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") commitFavoriteRename(favorite.path, favoriteLabelValue, favoriteGroupValue); else if (event.key === "Escape") setFavoriteEditingPath(null); }} /></div> : <button className="favorite-open" title={favorite.path} onClick={() => void browse(favorite.path)} onDoubleClick={(event) => beginFavoriteRename(favorite, event)}><FolderGlyph /><span>{favorite.label ?? labelForPath(favorite.path)}</span></button>}{editing ? <button className="favorite-edit visible" aria-label={language === "zh-CN" ? "保存" : "Save"} title={language === "zh-CN" ? "保存" : "Save"} onClick={(event) => { event.stopPropagation(); commitFavoriteRename(favorite.path, favoriteLabelValue, favoriteGroupValue); }}>✓</button> : <button className="favorite-edit" aria-label={language === "zh-CN" ? "编辑收藏" : "Edit favorite"} title={language === "zh-CN" ? "编辑名称和分组" : "Edit name and group"} onClick={(event) => beginFavoriteRename(favorite, event)}>✎</button>}{editing ? <button className="favorite-remove visible" aria-label={text.cancel} title={text.cancel} onClick={(event) => { event.stopPropagation(); setFavoriteEditingPath(null); }}>×</button> : <button className="favorite-remove" aria-label={text.removeFavorite} title={text.removeFavorite} onClick={(event) => removeFavorite(favorite.path, event)}>×</button>}</div>; })}</div>}</section>; })}</div><hr /></>}
+        <p>{text.locations}</p><div className="location-list">{locations.map((location) => { const isDrive = location.totalSpace !== null && location.availableSpace !== null && location.totalSpace > 0; const usedPercent = isDrive ? Math.max(0, Math.min(100, (location.totalSpace! - location.availableSpace!) / location.totalSpace! * 100)) : 0; return <button key={location.path} data-drop-path={location.path} className={`location ${isDrive || !location.isAvailable ? "drive-location" : ""} ${!location.isAvailable ? "unavailable" : ""} ${listing?.path.toLowerCase() === location.path.toLowerCase() ? "selected" : ""} ${dragTarget === location.path ? "drop-target" : ""}`} onClick={() => void browse(location.path)}><span className="location-label">{localizedLocation(location.label, language)}</span>{!location.isAvailable ? <span className="drive-space-label">{language === "zh-CN" ? "已断开 · 点击重试" : "Disconnected · click to retry"}</span> : isDrive && <><span className="drive-space-label">{formatSize(location.availableSpace!)} {text.available} / {formatSize(location.totalSpace!)}</span><span className="drive-space-track"><i style={{ width: `${usedPercent}%` }} /></span></>}</button>; })}</div>
+        <hr /><p>{text.folders}</p><div className="folder-tree">{treeRoots.map((root) => renderTreeNode(root.path, localizedLocation(root.label, language)))}</div>
+        <hr /><p>{text.selection}</p><span>{selectedPaths.size > 1 ? `${selectedPaths.size} ${text.selectedCount}` : selected ? selected.name : text.nothingSelected}</span><span className="muted">{selectedPaths.size > 1 ? (language === "zh-CN" ? "可复制、移动或删除所选项目" : "Copy, move, or delete the selection") : selected ? (selected.isDirectory ? text.folder : formatSize(selected.size)) : text.selectHint}</span>
+        {selected?.isDirectory && selectedPaths.size === 1 && <div className="folder-size-card">{folderSize ? <><strong>{formatSize(folderSize.totalBytes)}</strong><span>{language === "zh-CN" ? `${folderSize.scannedFiles} 个文件 · ${folderSize.scannedFolders} 个文件夹` : `${folderSize.scannedFiles} files · ${folderSize.scannedFolders} folders`}</span>{folderSize.issues > 0 && <small>{language === "zh-CN" ? `${folderSize.issues} 个位置无法读取` : `${folderSize.issues} locations could not be read`}</small>}{folderSize.running ? <button onClick={cancelFolderSizeCalculation}>{language === "zh-CN" ? "停止计算" : "Stop calculating"}</button> : <button onClick={() => void calculateSelectedFolderSize()}>{language === "zh-CN" ? "重新计算" : "Calculate again"}</button>}</> : <button onClick={() => void calculateSelectedFolderSize()}>{language === "zh-CN" ? "计算文件夹大小" : "Calculate folder size"}</button>}</div>}
+      </aside>
+      <section className={`content ${previewPaneOpen ? "with-preview-layout" : ""}`} style={{ "--modified-width": `${columnWidths.modified}px`, "--type-width": `${columnWidths.type}px`, "--size-width": `${columnWidths.size}px` } as React.CSSProperties}>
+        <div className="navigation"><button onClick={goBack} onContextMenu={(event) => openHistoryMenu("back", event)} title={text.historyHint} disabled={!activeTab || activeTab.historyIndex === 0}>←</button><button onClick={goForward} onContextMenu={(event) => openHistoryMenu("forward", event)} title={text.historyHint} disabled={!activeTab || activeTab.historyIndex >= activeTab.history.length - 1}>→</button><form className="address-form" onSubmit={submitAddress}>{addressEditing ? <><input ref={addressInputRef} autoFocus aria-label={text.address} value={address} onChange={(event) => { setAddress(event.target.value); setAddressSuggestionIndex(-1); }} onKeyDown={handleAddressKeyDown} onBlur={() => setAddressEditing(false)} placeholder={text.address} autoComplete="off" />{addressSuggestions.length > 0 && <div className="address-suggestions" role="listbox">{addressSuggestions.map((suggestion, index) => <button key={suggestion.path} type="button" role="option" aria-selected={index === addressSuggestionIndex} className={index === addressSuggestionIndex ? "active" : ""} onMouseDown={(event) => event.preventDefault()} onClick={() => chooseAddressSuggestion(suggestion)}><FolderGlyph /><span><strong>{suggestion.label}</strong><small>{suggestion.path}</small></span><i>{suggestion.source === "recent" ? (language === "zh-CN" ? "最近" : "Recent") : ""}</i></button>)}</div>}</> : <div className="breadcrumbs" title={`${text.editAddress} (Ctrl+L)`} onDoubleClick={beginAddressEditing}>{crumbs.map((crumb, index) => <span key={crumb.path}><button type="button" data-drop-path={crumb.path} className={dragTarget === crumb.path ? "drop-target" : ""} onClick={() => void browse(crumb.path)}>{crumb.label}</button>{index < crumbs.length - 1 && <i>›</i>}</span>)}<button type="button" className="edit-address" aria-label={text.editAddress} onClick={beginAddressEditing}>✎</button></div>}</form><div className="search-shell"><input className="search" value={query} onChange={(event) => changeSearchQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void startDeepSearch(); } }} placeholder={text.search} /><button className="search-run" aria-label={searching ? text.cancel : text.searchAll} title={searching ? text.cancel : text.searchAll} onClick={() => searching ? cancelDeepSearch() : void startDeepSearch()}>{searching ? "×" : "⌕"}</button><button className={`search-filter-button ${searchPanelOpen ? "active" : ""}`} aria-label={text.searchFilters} title={text.searchFilters} onClick={() => setSearchPanelOpen((open) => !open)}>≡</button>{searchPanelOpen && renderSearchPanel()}</div></div>
+        <div className="content-heading">
+          <div className="content-identity"><div><h1>{currentLabel}</h1><span className="clean-path">{searchResults !== null ? `${listing?.path ?? ""}${query ? ` · ${query}` : ""}` : listing?.path ?? ""}</span></div>{searchResults !== null ? <button className="favorite-current" aria-label={text.backToFolder} title={text.backToFolder} onClick={clearDeepSearch}>×</button> : <button className={`favorite-current ${currentIsFavorite ? "active" : ""}`} aria-label={currentIsFavorite ? text.removeFavorite : text.addFavorite} title={currentIsFavorite ? text.removeFavorite : text.addFavorite} onClick={toggleFavoriteCurrent}>{currentIsFavorite ? "★" : "☆"}</button>}</div>
+          {unavailableLocation && unavailableCopy && unavailableLocation.path.toLocaleLowerCase() === listing?.path.toLocaleLowerCase() && <div className={`location-warning reason-${unavailableLocation.reason ?? "unknown"}`}><span><strong>{unavailableCopy.title}</strong><small>{unavailableCopy.detail}</small></span><button onClick={() => listing && void browse(listing.path, activeTabId, false)}>{language === "zh-CN" ? "立即重试" : "Retry"}</button><button onClick={() => { const home = locations.find((location) => location.label === "Home" && location.isAvailable); if (home) void browse(home.path); }}>{language === "zh-CN" ? "返回主页" : "Go home"}</button></div>}
+          <div className="heading-actions"><div className="view-tools">
+            <div className="menu-anchor"><button className="toolbar-control" aria-expanded={openMenu === "sort"} onClick={() => toggleToolbarMenu("sort")}><SortIcon /><span>{text.sort}</span><ChevronIcon /></button>{openMenu === "sort" && <div className="toolbar-menu sort-menu" role="menu">{(["name", "modified", "type", "size"] as SortKey[]).map((key) => <button key={key} className={sortKey === key ? "chosen" : ""} onClick={() => chooseSort(key)}><span>{key === "name" ? text.name : key === "modified" ? text.dateModified : key === "type" ? text.type : text.size}</span>{sortKey === key && <b>{sortDirection === "ascending" ? "↑" : "↓"}</b>}</button>)}</div>}</div>
+            <div className="menu-anchor"><button className="toolbar-control" aria-expanded={openMenu === "view"} onClick={() => toggleToolbarMenu("view")}><ViewIcon /><span>{text.view}</span><ChevronIcon /></button>{openMenu === "view" && <div className="toolbar-menu view-menu" role="menu"><button className={viewMode === "comfortable" ? "chosen" : ""} onClick={() => chooseView("comfortable")}><span>{text.comfortable}</span>{viewMode === "comfortable" && <b>✓</b>}</button><button className={viewMode === "compact" ? "chosen" : ""} onClick={() => chooseView("compact")}><span>{text.compact}</span>{viewMode === "compact" && <b>✓</b>}</button><button className={viewMode === "grid" ? "chosen" : ""} onClick={() => chooseView("grid")}><span>{text.grid}</span>{viewMode === "grid" && <b>✓</b>}</button><hr /><button className={previewPaneOpen ? "chosen" : ""} onClick={togglePreviewPane}><span>{text.previewPane}</span>{previewPaneOpen && <b>✓</b>}</button></div>}</div>
+            <div className="menu-anchor"><button className="toolbar-control" aria-expanded={openMenu === "actions"} onClick={toggleActionsMenu}><ActionsIcon /><span>{text.actions}</span><ChevronIcon /></button>{openMenu === "actions" && <div className="toolbar-menu actions-menu floating-actions-menu" style={actionsMenuStyle} role="menu">
+              <button disabled={!selected || selectedPaths.size !== 1 || selected.isDirectory} onClick={() => { setOpenMenu(null); void openWithSelected(); }}><span>{text.openWith}</span></button>
+              <button disabled={!selected || selectedPaths.size !== 1} onClick={() => { setOpenMenu(null); void showSelectedProperties(); }}><span>{text.properties}</span><kbd>Alt+Enter</kbd></button><hr />
+              <button disabled={!selected?.isDirectory || selectedPaths.size !== 1} onClick={() => { setOpenMenu(null); void calculateSelectedFolderSize(); }}><span>{language === "zh-CN" ? "计算文件夹大小" : "Calculate folder size"}</span></button>
+              <button disabled={!listing} onClick={() => { setOpenMenu(null); void openTerminalAt(terminalPathForSelection()); }}><span>{text.terminalHere}</span></button>
+              <button disabled={!listing} onClick={() => { setOpenMenu(null); void openTerminalAt(terminalPathForSelection(), "claude"); }}><span>{text.claudeHere}</span><b>›_</b></button>
+              <button disabled={!listing} onClick={() => { setOpenMenu(null); toggleFavoriteCurrent(); }}><span>{currentIsFavorite ? text.removeFavorite : text.addFavorite}</span><b>{currentIsFavorite ? "★" : "☆"}</b></button><hr />
+              <button disabled={!selectedPaths.size || !!operation} onClick={() => void copySelection("copy")}><span>{text.copy}</span><kbd>Ctrl+C</kbd></button>
+              <button disabled={!selectedPaths.size || !!operation} onClick={() => void copySelection("move")}><span>{text.cut}</span><kbd>Ctrl+X</kbd></button>
+              <button disabled={!selectedPaths.size} onClick={() => void copySelectionText("path")}><span>{text.copyPath}</span></button>
+              <button disabled={!selectedPaths.size} onClick={() => void copySelectionText("name")}><span>{text.copyName}</span></button>
+              <button disabled={!listing} onClick={() => void pasteIntoCurrent()}><span>{text.paste}</span><kbd>Ctrl+V</kbd></button>
+              <button disabled={!undoAction || !!operation || undoBusy} title={text.undoRetention} onClick={() => void undoLastOperation()}><span>{latestUndo ? `${text.undo}：${latestUndo.label}` : text.undo}</span><kbd>{undoStack.length ? `${undoStack.length} · Ctrl+Z` : "Ctrl+Z"}</kbd></button><hr />
+              <button disabled={!selectedPaths.size || !!operation || archiveBusy} onClick={() => void compressSelection()}><span>{text.compressZip}</span></button>
+              <button disabled={selectedEntries.length !== 1 || selectedEntries[0]?.extension?.toLowerCase() !== "zip" || !!operation || archiveBusy} onClick={() => void extractSelectedZip()}><span>{text.extractZip}</span></button>
+              <button disabled={selectedPaths.size < 2 || !!operation || archiveBusy} onClick={beginBatchRename}><span>{text.batchRename}</span></button><hr />
+              <button disabled={selectedPaths.size !== 1 || !!operation || searchResults !== null} onClick={beginRename}><span>{text.rename}</span><kbd>F2</kbd></button>
+              <button disabled={!selectedPaths.size || !!operation} onClick={() => void recycleSelection()}><span>{text.delete}</span><kbd>Del</kbd></button>
+              <button className="danger" disabled={!selectedPaths.size || !!operation} onClick={() => void permanentlyDeleteSelection()}><span>{text.permanentDelete}</span><kbd>Shift+Del</kbd></button>
+            </div>}</div>
+          </div></div>
+        </div>
+        <div className={`columns ${viewMode === "grid" ? "grid-hidden" : ""}`}><div className="column-heading"><button onClick={() => chooseSort("name")}>{text.name} {sortKey === "name" ? (sortDirection === "ascending" ? "↑" : "↓") : ""}</button></div><div className="column-heading"><span className="column-resizer" role="separator" aria-orientation="vertical" title={language === "zh-CN" ? "拖动调整列宽；双击重置" : "Drag to resize; double-click to reset"} onPointerDown={(event) => beginColumnResize("modified", event)} onDoubleClick={(event) => resetColumnWidth("modified", event)} /><button onClick={() => chooseSort("modified")}>{text.modified} {sortKey === "modified" ? (sortDirection === "ascending" ? "↑" : "↓") : ""}</button></div><div className="column-heading"><span className="column-resizer" role="separator" aria-orientation="vertical" title={language === "zh-CN" ? "拖动调整列宽；双击重置" : "Drag to resize; double-click to reset"} onPointerDown={(event) => beginColumnResize("type", event)} onDoubleClick={(event) => resetColumnWidth("type", event)} /><button onClick={() => chooseSort("type")}>{text.type} {sortKey === "type" ? (sortDirection === "ascending" ? "↑" : "↓") : ""}</button></div><div className="column-heading"><span className="column-resizer" role="separator" aria-orientation="vertical" title={language === "zh-CN" ? "拖动调整列宽；双击重置" : "Drag to resize; double-click to reset"} onPointerDown={(event) => beginColumnResize("size", event)} onDoubleClick={(event) => resetColumnWidth("size", event)} /><button onClick={() => chooseSort("size")}>{text.size} {sortKey === "size" ? (sortDirection === "ascending" ? "↑" : "↓") : ""}</button></div></div>
+        <div className={`browser-stage ${previewPaneOpen ? "with-preview" : ""}`}><div ref={fileListRef} role="listbox" aria-multiselectable="true" tabIndex={0} data-drop-path={listing?.path} className={`file-list view-${viewMode} ${dragTarget === listing?.path ? "drop-target" : ""}`} onScroll={(event: UIEvent<HTMLDivElement>) => setScrollTop(event.currentTarget.scrollTop)} onContextMenu={openBackgroundContextMenu} onPointerDown={beginMarqueeSelection} onPointerMove={updateMarqueeSelection} onPointerUp={finishMarqueeSelection} onPointerCancel={finishMarqueeSelection}>
+          <div style={{ height: virtualHeight, position: "relative" }}><div className="entries-window" style={{ transform: `translateY(${firstVisibleRow * rowHeight}px)`, gridTemplateColumns: viewMode === "grid" ? `repeat(${gridColumns}, minmax(0, 1fr))` : undefined }}>{visibleEntries.map((entry, localIndex) => {
+            const thumbnail = thumbnailCache[entry.path];
+            const nativeIcon = fileIconCache[entry.path];
+            const iconKind = iconKindFor(entry);
+            const isCut = clipboard?.mode === "move" && clipboard.paths.includes(entry.path);
+            return <button key={entry.path} role="option" aria-selected={selectedPaths.has(entry.path)} data-drop-path={entry.isDirectory ? entry.path : undefined} className={`file-row ${selectedPaths.has(entry.path) ? "selected" : ""} ${selected?.path === entry.path ? "focused-item" : ""} ${entry.isHidden ? "hidden-item" : ""} ${isCut ? "cut" : ""} ${dragTarget === entry.path ? "drop-target" : ""}`} onPointerDown={(event) => armPointerDrag(entry, event)} onClick={(event) => selectEntry(entry, firstVisible + localIndex, event)} onDoubleClick={() => { if (renamingPath !== entry.path) void openEntry(entry); }} onContextMenu={(event) => openEntryContextMenu(entry, firstVisible + localIndex, event)}>
+              <span title={entry.isLink ? `${language === "zh-CN" ? "链接到" : "Links to"} ${entry.linkTarget ?? ""}` : undefined} className={`${thumbnail ? "entry-icon thumbnail-icon" : nativeIcon ? "entry-icon native-icon" : `entry-icon ${iconKind}-icon`} ${entry.isLink ? "link-entry-icon" : ""}`}>{thumbnail ? <img src={thumbnail} alt="" /> : nativeIcon ? <img src={nativeIcon} alt="" /> : <EntryIcon entry={entry} />}</span>
+              <div className="name-cell">{renamingPath === entry.path ? <div className="rename-editor"><input ref={renameInputRef} className={`inline-rename ${renameError ? "invalid" : ""}`} value={renameValue} aria-invalid={!!renameError} aria-describedby={renameError ? "rename-error" : undefined} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()} onChange={(event) => { setRenameValue(event.target.value); setRenameError(null); }} onBlur={() => { if (!renameError) void commitRename(); }} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void commitRename(); } else if (event.key === "Escape") { event.preventDefault(); setRenamingPath(null); setRenameError(null); } }} />{renameError && <small id="rename-error" className="rename-error">{renameError}</small>}</div> : <strong title={entry.name}>{displayName(entry, showExtensions)}</strong>}{searchResults !== null && <small title={parentDirectory(entry.path)}>{parentDirectory(entry.path)}</small>}</div>
+              <span>{formatDate(entry.modifiedUnixSeconds, language)}</span><span className="type-cell">{typeLabelFor(entry, language)}</span><span>{entry.isDirectory ? "—" : formatSize(entry.size)}</span>
+            </button>;
+          })}</div></div>
+          {!isLoading && sortedEntries.length === 0 && <div className="empty-state">{query ? text.noMatches : text.empty}</div>}
+          {selectionBox && <div className="selection-box" style={{ left: Math.min(selectionBox.startX, selectionBox.currentX), top: Math.min(selectionBox.startY, selectionBox.currentY), width: Math.max(1, Math.abs(selectionBox.currentX - selectionBox.startX)), height: Math.max(1, Math.abs(selectionBox.currentY - selectionBox.startY)) }} />}
+        </div>{previewPaneOpen && <aside className="preview-pane"><header><strong>{text.preview}</strong><button aria-label={text.close} onClick={togglePreviewPane}>×</button></header>{selected && selectedPaths.size === 1 ? <PreviewContent entry={selected} preview={preview} loading={previewLoading} language={language} onOpen={() => void openEntry(selected)} onTextPage={(encoding, offset) => void loadTextPreviewPage(encoding, offset)} /> : <div className="preview-placeholder"><ViewIcon /><span>{text.quickViewHint}</span></div>}</aside>}</div>
+      </section>
+    </section>
+    <footer>{operation ? <div className="operation-status"><button className="operation-summary" onClick={() => setTaskCenterOpen(true)}><span>{operation.paused ? text.pause : operation.phase === "scanning" ? text.scanning : operation.mode === "copy" ? text.copying : text.moving} · {operation.currentName || (operation.phase === "scanning" ? operation.scannedItems : `${operation.completedItems}/${operation.totalItems}`)}</span></button><div className={`progress-track ${operation.phase === "scanning" ? "indeterminate" : ""}`}><i style={{ width: operation.phase === "scanning" ? "34%" : `${operation.totalBytes ? Math.min(100, operation.processedBytes / operation.totalBytes * 100) : 0}%` }} /></div><small>{operation.phase === "scanning" ? `${operation.scannedItems} ${text.scannedItems} · ${formatSize(operation.scannedBytes)}` : `${formatSize(operation.processedBytes)} / ${formatSize(operation.totalBytes)}${operation.speed > 0 && !operation.paused ? ` · ${formatSize(operation.speed)}/s · ${formatDuration((operation.totalBytes - operation.processedBytes) / operation.speed)}` : ""}`}</small><button onClick={() => void toggleOperationPaused()}>{operation.paused ? text.resume : text.pause}</button><button onClick={cancelOperation}>{text.cancel}</button></div> : searching ? <div className="search-operation-status"><span className="loading-dot">{text.searchAll}</span><span>{text.scanned} {searchProgress?.scanned ?? 0} · {searchProgress?.matches ?? 0} {text.matches}</span><small title={searchProgress?.currentPath}>{searchProgress?.currentPath}</small><button onClick={cancelDeepSearch}>{text.cancel}</button></div> : <><span className={isLoading ? "loading-dot" : ""}>{isLoading ? text.loading : text.ready}</span><span className="footer-message">{searchResults !== null && searchResultMeta ? `${searchResultMeta.provider === "everything" ? (language === "zh-CN" ? "Everything 索引" : "Everything index") : (language === "zh-CN" ? "本地扫描" : "Local scan")} · ${text.scanned} ${searchResultMeta.scanned}${searchResultMeta.truncated ? " · 20,000+" : searchResultMeta.cancelled ? ` · ${text.cancel}` : ""}` : status}</span>{latestUndo && <button className="footer-undo" disabled={undoBusy} title={`${latestUndo.label} · ${text.undoRetention}`} onClick={() => void undoLastOperation()}><span>{text.undo} · {latestUndo.label}</span><b>{undoStack.length}</b></button>}</>}<span className="item-count">{`${sortedEntries.length} ${text.shown}`}</span></footer>
+    {taskCenterOpen && <aside className="task-center" aria-label={text.tasks}><header><div><strong>{text.tasks}</strong><span>{operationTasks.filter((task) => ["queued", "running", "paused"].includes(task.status)).length} {language === "zh-CN" ? "项进行中" : "active"}</span></div><button aria-label={text.close} onClick={() => setTaskCenterOpen(false)}>×</button></header><div className="task-list">{operationTasks.length === 0 ? <div className="task-empty">{text.noTasks}</div> : [...operationTasks].reverse().map((task) => { const scanning = task.phase === "scanning" && ["running", "paused"].includes(task.status); const percent = task.totalBytes ? Math.min(100, task.processedBytes / task.totalBytes * 100) : task.status === "completed" ? 100 : 0; const stateLabel = task.status === "queued" ? text.queued : task.status === "paused" ? text.pause : task.status === "completed" ? text.completed : task.status === "cancelled" ? text.cancel : task.status === "failed" ? text.failed : scanning ? text.scanning : task.mode === "copy" ? text.copying : text.moving; const retryablePaths = retryableTaskPaths(task); return <article className={`task-item ${task.status}`} key={task.jobId}><div className="task-title"><strong>{task.mode === "copy" ? text.copy : text.cut} · {task.totalItems} {language === "zh-CN" ? "项" : "item(s)"}</strong><span>{stateLabel}</span></div><small title={scanning ? task.currentName : task.destination}>{scanning ? task.currentName || text.scanning : `→ ${task.destination}`}</small><div className={`task-progress ${scanning ? "indeterminate" : ""}`}><i style={{ width: scanning ? "34%" : `${percent}%` }} /></div><div className="task-meta"><span>{scanning ? `${task.scannedItems} ${text.scannedItems} · ${formatSize(task.scannedBytes)}` : task.totalBytes ? `${formatSize(task.processedBytes)} / ${formatSize(task.totalBytes)}` : `${task.completedItems}/${task.totalItems}`}</span>{!scanning && task.speed > 0 && task.status === "running" && <span>{formatSize(task.speed)}/s · {formatDuration((task.totalBytes - task.processedBytes) / task.speed)}</span>}<span>{task.issues.length > 0 ? `${task.issues.length} ${language === "zh-CN" ? "个问题" : "issue(s)"}` : ""}</span></div>{["queued", "running", "paused"].includes(task.status) && <div className="task-actions">{task.status !== "queued" && <button onClick={() => void toggleOperationPaused()}>{task.status === "paused" ? text.resume : text.pause}</button>}<button onClick={() => cancelTask(task)}>{text.cancel}</button></div>}{!["queued", "running", "paused"].includes(task.status) && retryablePaths.length > 0 && <div className="task-actions task-retry-actions"><button onClick={() => retryTaskFailures(task)}>{text.retryFailed} · {retryablePaths.length}</button></div>}</article>; })}</div>{operationTasks.some((task) => ["completed", "cancelled", "failed"].includes(task.status)) && <footer><button onClick={() => setOperationTasks((current) => current.filter((task) => !["completed", "cancelled", "failed"].includes(task.status)))}>{text.clearCompleted}</button></footer>}</aside>}
+    {pendingTransfer && currentConflict && <div className="settings-backdrop"><section className="settings-panel conflict-panel" role="dialog" aria-modal="true" aria-labelledby="conflict-title"><header><div><h2 id="conflict-title">{text.conflictTitle}</h2><p>{text.conflictProgress} {pendingTransfer.currentIndex + 1} / {pendingTransfer.conflicts.length} · {text.conflictIntro}</p></div><button className="settings-close" aria-label={text.cancel} onClick={() => setPendingTransfer(null)}>×</button></header><div className="conflict-compare"><article><span>{text.sourceItem}</span><div><i className={`entry-icon ${iconKindFor(currentConflict.source)}-icon`}><EntryIcon entry={currentConflict.source} /></i><strong title={currentConflict.source.path}>{currentConflict.source.name}</strong></div><small>{currentConflict.source.isDirectory ? text.folder : formatSize(currentConflict.source.size)} · {formatDate(currentConflict.source.modifiedUnixSeconds, language)}</small><em title={currentConflict.source.path}>{parentDirectory(currentConflict.source.path)}</em></article><article><span>{text.targetItem}</span><div><i className={`entry-icon ${iconKindFor(currentConflict.target)}-icon`}><EntryIcon entry={currentConflict.target} /></i><strong title={currentConflict.target.path}>{currentConflict.target.name}</strong></div><small>{currentConflict.target.isDirectory ? text.folder : formatSize(currentConflict.target.size)} · {formatDate(currentConflict.target.modifiedUnixSeconds, language)}</small><em title={currentConflict.target.path}>{parentDirectory(currentConflict.target.path)}</em></article></div>{pendingTransfer.conflicts.length - pendingTransfer.currentIndex > 1 && <label className="conflict-apply"><input type="checkbox" checked={applyConflictToRemaining} onChange={(event) => setApplyConflictToRemaining(event.target.checked)} /><span>{text.applyRemaining}</span></label>}<p className="conflict-warning">{text.replaceNoUndo}</p><div className="conflict-actions"><button onClick={() => setPendingTransfer(null)}>{text.cancel}</button><button onClick={() => resolveCurrentConflict("skip")}>{text.skip}</button><button onClick={() => resolveCurrentConflict("keepBoth")}>{text.keepBoth}</button><button className="primary" onClick={() => resolveCurrentConflict("replace")}>{text.replace}</button></div></section></div>}
+    {operationIssues.length > 0 && <div className="settings-backdrop"><section className="settings-panel issue-panel" role="dialog" aria-modal="true" aria-labelledby="issue-title"><header><div><h2 id="issue-title">{text.issueTitle}</h2><p>{text.issueIntro}</p></div><button className="settings-close" aria-label={text.close} onClick={() => setOperationIssues([])}>×</button></header><div className="issue-list">{operationIssues.map((issue, index) => { const canRetrySingle = retryTransfer?.clipboard.paths.some((path) => path.toLocaleLowerCase() === issue.path.toLocaleLowerCase()); return <article key={`${issue.path}-${index}`}><strong>{operationIssueLabel(issue.code, language)}</strong><span title={issue.path}>{issue.path}</span><small>{issue.message}</small>{canRetrySingle && <button onClick={() => void retrySingleTransferIssue(issue)}>{language === "zh-CN" ? "仅重试此项" : "Retry this item"}</button>}</article>; })}</div><div className="settings-footer issue-footer">{retryTransfer && <button className="secondary" onClick={() => { const retry = retryTransfer; setOperationIssues([]); setRetryTransfer(null); void startTransfer(retry.clipboard, retry.destination, retry.conflict, retry.conflictResolutions); }}>{text.retryFailed}</button>}<button onClick={() => setOperationIssues([])}>{text.close}</button></div></section></div>}
+    {deleteRequest && <div className="settings-backdrop"><section className="settings-panel delete-panel" role="alertdialog" aria-modal="true" aria-labelledby="delete-title"><header><div><h2 id="delete-title">{deleteRequest.permanent ? text.permanentDeleteTitle : text.deleteTitle}</h2><p>{deleteRequest.permanent ? text.permanentWarning : text.deleteWarning}</p></div><button className="settings-close" aria-label={text.cancel} onClick={() => setDeleteRequest(null)}>×</button></header><div className="delete-list">{deleteRequest.names.slice(0, 5).map((name, index) => <span key={`${name}-${index}`} title={name}>{name}</span>)}{deleteRequest.names.length > 5 && <small>{language === "zh-CN" ? `另有 ${deleteRequest.names.length - 5} 个项目` : `${deleteRequest.names.length - 5} more item(s)`}</small>}</div><div className="conflict-actions"><button onClick={() => setDeleteRequest(null)}>{text.cancel}</button><button className={deleteRequest.permanent ? "danger-primary" : "primary"} onClick={() => void confirmDeleteRequest()}>{deleteRequest.permanent ? text.confirmPermanentDelete : text.confirmDelete}</button></div></section></div>}
+    {batchRenameOpen && <div className="settings-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !archiveBusy) setBatchRenameOpen(false); }}><section className="settings-panel batch-rename-panel" role="dialog" aria-modal="true" aria-labelledby="batch-rename-title"><header><div><h2 id="batch-rename-title">{text.batchRenameTitle}</h2><p>{text.batchRenameIntro}</p></div><button className="settings-close" disabled={archiveBusy} aria-label={text.cancel} onClick={() => setBatchRenameOpen(false)}>×</button></header><div className="batch-rename-fields"><label><span>{text.findText}</span><input autoFocus value={batchRenameDraft.find} onChange={(event) => setBatchRenameDraft((draft) => ({ ...draft, find: event.target.value }))} /></label><label><span>{text.replaceWith}</span><input value={batchRenameDraft.replace} onChange={(event) => setBatchRenameDraft((draft) => ({ ...draft, replace: event.target.value }))} /></label><label><span>{text.prefix}</span><input value={batchRenameDraft.prefix} onChange={(event) => setBatchRenameDraft((draft) => ({ ...draft, prefix: event.target.value }))} /></label><label><span>{text.suffix}</span><input value={batchRenameDraft.suffix} onChange={(event) => setBatchRenameDraft((draft) => ({ ...draft, suffix: event.target.value }))} /></label><label className="numbering-field"><span>{text.addNumbers}</span><button className={`switch ${batchRenameDraft.addNumbers ? "on" : ""}`} role="switch" aria-checked={batchRenameDraft.addNumbers} onClick={() => setBatchRenameDraft((draft) => ({ ...draft, addNumbers: !draft.addNumbers }))}><span /></button></label><label><span>{text.startAt}</span><input type="number" min="0" max="999999" disabled={!batchRenameDraft.addNumbers} value={batchRenameDraft.startNumber} onChange={(event) => setBatchRenameDraft((draft) => ({ ...draft, startNumber: Math.max(0, Number(event.target.value) || 0) }))} /></label></div><div className="batch-preview"><strong>{text.previewChanges}</strong>{batchRenamePreview.slice(0, 12).map(({ entry, name }) => <div key={entry.path}><span title={entry.name}>{entry.name}</span><b>→</b><span title={name}>{name}</span></div>)}{batchRenamePreview.length > 12 && <small>{language === "zh-CN" ? `另有 ${batchRenamePreview.length - 12} 个项目` : `${batchRenamePreview.length - 12} more item(s)`}</small>}</div>{batchRenameError && <div className="batch-rename-error">{batchRenameError}</div>}<div className="conflict-actions"><button disabled={archiveBusy} onClick={() => setBatchRenameOpen(false)}>{text.cancel}</button><button className="primary" disabled={archiveBusy} onClick={() => void applyBatchRename()}>{archiveBusy ? text.loading : text.applyRename}</button></div></section></div>}
+    {spaceHealthOpen && renderSpaceHealth()}
+    {quickPreviewOpen && selected && selectedPaths.size === 1 && <div className="quick-preview-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setQuickPreviewOpen(false); }}><section className="quick-preview" role="dialog" aria-modal="true" aria-label={text.preview}><button className="quick-preview-close" aria-label={text.close} onClick={() => setQuickPreviewOpen(false)}>×</button><PreviewContent entry={selected} preview={preview} loading={previewLoading} language={language} onOpen={() => { setQuickPreviewOpen(false); void openEntry(selected); }} onTextPage={(encoding, offset) => void loadTextPreviewPage(encoding, offset)} /></section></div>}
+    {settingsOpen && <div className="settings-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setSettingsOpen(false); }}>
+      <section className="settings-panel" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+        <header><div><h2 id="settings-title">{text.settingsTitle}</h2><p>{text.settingsIntro}</p></div><button className="settings-close" aria-label={text.close} onClick={() => setSettingsOpen(false)}>×</button></header>
+        <div className="settings-body">
+          <div className="setting-row"><div><strong>{text.interfaceLanguage}</strong></div><div className="segmented"><button className={language === "zh-CN" ? "active" : ""} onClick={() => chooseLanguage("zh-CN")}>{text.chinese}</button><button className={language === "en" ? "active" : ""} onClick={() => chooseLanguage("en")}>{text.english}</button></div></div>
+          <div className="setting-row"><div><strong>{text.fileExtensions}</strong><p>{text.extensionsHint}</p></div><button className={`switch ${showExtensions ? "on" : ""}`} role="switch" aria-checked={showExtensions} onClick={toggleExtensions}><span /></button></div>
+          <div className="setting-row"><div><strong>{text.hiddenItems}</strong><p>{text.hiddenHint}</p></div><button className={`switch ${showHidden ? "on" : ""}`} role="switch" aria-checked={showHidden} onClick={toggleHidden}><span /></button></div>
+          <div className="setting-row folder-integration-row everything-setting-row"><div><strong>{language === "zh-CN" ? "Everything 秒级搜索" : "Everything instant search"}</strong><p>{language === "zh-CN" ? "优先使用本机 Everything 索引搜索子文件夹；不可用或筛选条件不适合时自动回退到 Flow Files 本地扫描。" : "Prefer the local Everything index for subfolder searches, with automatic fallback to Flow Files' native scan."}</p><small className={everythingStatus?.running && everythingStatus.databaseLoaded ? "integration-enabled" : ""}>{everythingStatusBusy ? (language === "zh-CN" ? "正在读取状态…" : "Checking status…") : everythingStatusError ? `${language === "zh-CN" ? "状态读取失败" : "Status unavailable"}: ${everythingStatusError}` : everythingStatus?.running && everythingStatus.databaseLoaded ? `${language === "zh-CN" ? "索引就绪" : "Index ready"}${everythingStatus.version ? ` · v${everythingStatus.version}` : ""}${everythingStatus.indexedDrives.length ? ` · ${everythingStatus.indexedDrives.join(" ")}` : ""}` : everythingStatus?.installed ? (language === "zh-CN" ? "已安装；首次搜索时会自动启动索引客户端" : "Installed; the index client starts on first search") : (language === "zh-CN" ? "未检测到 Everything；搜索会使用本地扫描" : "Everything not found; searches use the native scanner")}</small></div><button className={`switch ${preferEverything ? "on" : ""}`} role="switch" aria-checked={preferEverything} onClick={toggleEverythingSearch}><span /></button></div>
+          <div className="setting-row folder-integration-row"><div><strong>{text.windowsFolderIntegration}</strong><p>{text.windowsFolderIntegrationHint}</p><small className={folderIntegration?.enabled ? "integration-enabled" : ""}>{folderIntegration?.enabled ? text.windowsFolderIntegrationEnabled : text.windowsFolderIntegrationDisabled}</small>{folderIntegrationError && <small className="integration-error">{folderIntegrationError}</small>}</div><button className={`switch ${folderIntegration?.enabled ? "on" : ""}`} role="switch" aria-checked={!!folderIntegration?.enabled} disabled={folderIntegrationBusy} onClick={() => void toggleFolderIntegration()}><span /></button></div>
+          <div className="setting-row folder-integration-row context-menu-row"><div><strong>{text.explorerContextMenu}</strong><p>{text.explorerContextMenuHint}</p><small className={folderContextMenu?.enabled ? "integration-enabled" : ""}>{folderContextMenu?.enabled ? text.explorerContextMenuEnabled : text.explorerContextMenuDisabled}</small>{folderContextMenuError && <small className="integration-error">{folderContextMenuError}</small>}</div><button className={`switch ${folderContextMenu?.enabled ? "on" : ""}`} role="switch" aria-checked={!!folderContextMenu?.enabled} disabled={folderContextMenuBusy} onClick={() => void toggleFolderContextMenu()}><span /></button></div>
+          <div className="setting-row claude-provider-row"><div><strong>{text.claudeProvider}</strong></div><div className="segmented"><button className={claudeProvider === "anthropic" ? "active" : ""} onClick={() => chooseClaudeProvider("anthropic")}>{text.officialAnthropic}</button><button className={claudeProvider === "deepseek" ? "active" : ""} onClick={() => chooseClaudeProvider("deepseek")}>{text.deepseek}</button></div></div>
+          <div className="setting-row claude-access-row"><div><strong>{text.claudeFullAccess}</strong><p>{text.claudeFullAccessHint}</p></div><button className={`switch ${claudeFullAccess ? "on" : ""}`} role="switch" aria-checked={claudeFullAccess} onClick={toggleClaudeFullAccess}><span /></button></div>
+          {claudeProvider === "deepseek" && <div className="claude-key-setting">
+            <div className="claude-key-heading"><div><strong>{text.deepseekApiKey}</strong><p>{text.deepseekKeyHint}</p></div><span className={`credential-state ${(claudeCredential?.stored || claudeCredential?.environmentAvailable) ? "ready" : "missing"}`}>{claudeCredential?.stored ? text.keySaved : claudeCredential?.environmentAvailable ? text.keyFromEnvironment : text.keyMissing}</span></div>
+            <div className="claude-key-controls"><input type="password" autoComplete="off" spellCheck={false} value={claudeApiKeyDraft} onChange={(event) => setClaudeApiKeyDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void saveClaudeApiKey(); }} placeholder={claudeCredential?.stored ? "••••••••••••••••" : text.enterApiKey} /><button className="primary" disabled={claudeCredentialBusy || !claudeApiKeyDraft.trim()} onClick={() => void saveClaudeApiKey()}>{claudeCredential?.stored ? text.replaceKey : text.saveKey}</button>{claudeCredential?.stored && <button className="secondary" disabled={claudeCredentialBusy} onClick={() => void removeClaudeApiKey()}>{text.removeKey}</button>}</div>
+            {claudeCredentialError && <p className="claude-key-error">{claudeCredentialError}</p>}
+          </div>}
+          <div className="claude-diagnostic-setting">
+            <div className="claude-diagnostic-heading"><div><strong>{text.claudeDiagnostics}</strong><p>{language === "zh-CN" ? "检查 Claude 命令、版本、凭据与 API 连通性。密钥不会显示或写入日志。" : "Check the Claude command, version, credential, and API connectivity. The key is never displayed or logged."}</p></div><button disabled={claudeDiagnosticBusy} onClick={() => void runClaudeDiagnostic()}>{claudeDiagnosticBusy ? text.testingConnection : text.testConnection}</button></div>
+            {claudeDiagnostic && <div className={`claude-diagnostic-result ${claudeDiagnostic.status === "ready" ? "ready" : "problem"}`}>
+              <div className="diagnostic-status"><strong>{claudeDiagnostic.status === "ready" ? text.diagnosticReady : text.diagnosticMissing}</strong><span>{claudeDiagnosticLabel(claudeDiagnostic)}</span></div>
+              <dl><div><dt>{text.diagnosticVersion}</dt><dd>{claudeDiagnostic.claudeFound ? claudeDiagnostic.version ?? text.credentialAvailable : text.credentialUnavailable}</dd></div><div><dt>{text.diagnosticEndpoint}</dt><dd title={claudeDiagnostic.endpoint}>{claudeDiagnostic.endpoint || "—"}</dd></div><div><dt>{text.diagnosticCredential}</dt><dd>{claudeDiagnostic.keyAvailable ? text.credentialAvailable : text.credentialUnavailable}</dd></div>{claudeDiagnostic.balanceAvailable !== null && <div><dt>{text.diagnosticBalance}</dt><dd>{claudeDiagnostic.balanceAvailable ? (language === "zh-CN" ? "是" : "Yes") : (language === "zh-CN" ? "否" : "No")}</dd></div>}</dl>
+              {claudeDiagnostic.status !== "ready" && claudeDiagnostic.message && <small>{claudeDiagnostic.message}</small>}
+            </div>}
+          </div>
+        </div>
+        <div className="settings-footer"><button onClick={() => setSettingsOpen(false)}>{text.close}</button></div>
+      </section>
+    </div>}
+    {contextMenu?.kind === "entry" && <div className="context-menu" style={{ left: contextMenu.x, top: contextMenu.y }} onPointerDown={(event) => event.stopPropagation()}>
+      <button disabled={!selected || selectedPaths.size !== 1} onClick={() => { setContextMenu(null); if (selected) void openEntry(selected); }}><span>{text.open}</span><kbd>Enter</kbd></button>
+      <button disabled={!selected || selectedPaths.size !== 1 || selected.isDirectory} onClick={() => { setContextMenu(null); void openWithSelected(); }}><span>{text.openWith}</span></button>
+      <button disabled={!listing} onClick={() => { const path = terminalPathForSelection(); setContextMenu(null); void openTerminalAt(path); }}><span>{text.terminalHere}</span></button>
+      <button disabled={!listing} onClick={() => { const path = terminalPathForSelection(); setContextMenu(null); void openTerminalAt(path, "claude"); }}><span>{text.claudeHere}</span><b>›_</b></button>
+      <hr />
+      <button onClick={() => { setContextMenu(null); void copySelection("copy"); }}><span>{text.copy}</span><kbd>Ctrl+C</kbd></button>
+      <button onClick={() => { setContextMenu(null); void copySelection("move"); }}><span>{text.cut}</span><kbd>Ctrl+X</kbd></button>
+      <button onClick={() => void copySelectionText("path")}><span>{text.copyPath}</span></button>
+      <button onClick={() => void copySelectionText("name")}><span>{text.copyName}</span></button>
+      <button onClick={() => { setContextMenu(null); void pasteIntoCurrent(); }}><span>{text.paste}</span><kbd>Ctrl+V</kbd></button>
+      <hr />
+      <button disabled={!selectedPaths.size || archiveBusy} onClick={() => void compressSelection()}><span>{text.compressZip}</span></button>
+      <button disabled={selectedEntries.length !== 1 || selectedEntries[0]?.extension?.toLowerCase() !== "zip" || archiveBusy} onClick={() => void extractSelectedZip()}><span>{text.extractZip}</span></button>
+      <button disabled={selectedPaths.size < 2 || archiveBusy} onClick={beginBatchRename}><span>{text.batchRename}</span></button>
+      <hr />
+      <button disabled={selectedPaths.size !== 1 || searchResults !== null} onClick={() => { setContextMenu(null); beginRename(); }}><span>{text.rename}</span><kbd>F2</kbd></button>
+      <button onClick={() => { setContextMenu(null); void recycleSelection(); }}><span>{text.delete}</span><kbd>Del</kbd></button>
+      <button className="danger" onClick={() => { setContextMenu(null); void permanentlyDeleteSelection(); }}><span>{text.permanentDelete}</span><kbd>Shift+Del</kbd></button>
+      <hr />
+      <button disabled={!selected || selectedPaths.size !== 1} onClick={() => void revealSelectedInExplorer()}><span>{text.revealInExplorer}</span></button>
+      <button disabled={!selected || selectedPaths.size !== 1} onClick={() => void showSelectedSystemMenu()}><span>{text.systemMenu}</span><kbd>Shift+F10</kbd></button>
+      <hr />
+      <button disabled={!selected || selectedPaths.size !== 1} onClick={() => { setContextMenu(null); void showSelectedProperties(); }}><span>{text.properties}</span><kbd>Alt+Enter</kbd></button>
+    </div>}
+    {contextMenu?.kind === "background" && <div className="context-menu" style={{ left: contextMenu.x, top: contextMenu.y }} onPointerDown={(event) => event.stopPropagation()}>
+      <button onClick={() => void createItem("folder")}><span>{text.newFolder}</span></button>
+      <button onClick={() => void createItem("text")}><span>{text.newTextFile}</span></button>
+      <button onClick={() => void createItem("markdown")}><span>{text.newMarkdownFile}</span></button>
+      <hr />
+      <button onClick={() => { setContextMenu(null); void pasteIntoCurrent(); }}><span>{text.paste}</span><kbd>Ctrl+V</kbd></button>
+      <button onClick={() => { setContextMenu(null); if (listing) void browse(listing.path, activeTabId, false); }}><span>{text.refresh}</span><kbd>F5</kbd></button>
+      <button onClick={() => { setContextMenu(null); void openTerminalAt(); }}><span>{text.terminalHere}</span></button>
+      <button onClick={() => { setContextMenu(null); void openTerminalAt(listing?.path, "claude"); }}><span>{text.claudeHere}</span><b>›_</b></button>
+    </div>}
+    {tabContextMenu && contextTab && <div className="context-menu tab-context-menu" style={{ left: tabContextMenu.x, top: tabContextMenu.y }} onPointerDown={(event) => event.stopPropagation()}>
+      <button onClick={() => toggleTabPinned(contextTab.id)}><span>{contextTab.pinned ? text.unpinTab : text.pinTab}</span><b>{contextTab.pinned ? "⌖" : ""}</b></button>
+      <button onClick={() => duplicateTab(contextTab)}><span>{text.duplicateTab}</span></button>
+      <button disabled={!closedTabs.length} onClick={reopenClosedTab}><span>{text.reopenClosedTab}</span><kbd>Ctrl+Shift+T</kbd></button>
+      <button onClick={() => { const path = contextTab.path; setTabContextMenu(null); void openTerminalAt(path); }}><span>{text.terminalHere}</span></button>
+      <button onClick={() => { const path = contextTab.path; setTabContextMenu(null); void openTerminalAt(path, "claude"); }}><span>{text.claudeHere}</span><b>›_</b></button>
+      <hr />
+      <button disabled={contextTab.pinned || tabs.length === 1} onClick={() => closeTabById(contextTab.id)}><span>{text.closeTab}</span><kbd>Ctrl+W</kbd></button>
+      <button disabled={tabs.every((tab) => tab.id === contextTab.id || tab.pinned)} onClick={() => closeOtherTabs(contextTab.id)}><span>{text.closeOtherTabs}</span></button>
+    </div>}
+    {historyMenu && <div className="context-menu history-context-menu" style={{ left: historyMenu.x, top: historyMenu.y }} onPointerDown={(event) => event.stopPropagation()}>{historyMenu.items.map((item) => <button key={`${item.index}-${item.path}`} title={item.path} onClick={() => navigateToHistory(item.index, item.path)}><span>{labelForPath(item.path)}</span><small>{item.path}</small></button>)}</div>}
+    {dragGhost && <div className={`drag-ghost ${dragGhost.mode}`} style={{ left: dragGhost.x + 14, top: dragGhost.y + 14 }}><b>{dragGhost.mode === "blocked" ? "×" : dragGhost.mode === "copy" ? "+" : "→"}</b><span>{dragGhost.mode === "blocked" ? (language === "zh-CN" ? "不能放在这里" : "Can't drop here") : language === "zh-CN" ? `${dragGhost.mode === "copy" ? "复制" : "移动"} ${dragGhost.count} 项到 ${dragGhost.targetLabel}` : `${dragGhost.mode === "copy" ? "Copy" : "Move"} ${dragGhost.count} item(s) to ${dragGhost.targetLabel}`}</span></div>}
+  </main>;
+}
+
+export default App;

@@ -1,0 +1,137 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:FileManagerLab.ViewModels"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:models="using:FileManagerLab.Models"
+        mc:Ignorable="d" d:DesignWidth="1280" d:DesignHeight="760"
+        x:Class="FileManagerLab.Views.MainWindow"
+        x:DataType="vm:MainViewModel"
+        Icon="/Assets/avalonia-logo.ico"
+        Title="File manager technology lab"
+        Width="1280" Height="760" MinWidth="940" MinHeight="620"
+        Background="#11131A">
+
+    <Design.DataContext>
+        <!-- This only sets the DataContext for the previewer in an IDE,
+             to set the actual DataContext for runtime, set the DataContext property in code (look at App.axaml.cs) -->
+        <vm:MainViewModel />
+    </Design.DataContext>
+
+    <Window.Styles>
+        <Style Selector="Button.toolbar">
+            <Setter Property="Background" Value="#242936" />
+            <Setter Property="BorderBrush" Value="#343B4D" />
+            <Setter Property="CornerRadius" Value="9" />
+            <Setter Property="Padding" Value="12,7" />
+        </Style>
+        <Style Selector="ListBoxItem.file">
+            <Setter Property="Margin" Value="5" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+        </Style>
+    </Window.Styles>
+
+    <Grid RowDefinitions="Auto,Auto,*,Auto">
+        <Border Background="#171A22" Padding="18,12" BorderBrush="#292E3B" BorderThickness="0,0,0,1">
+            <Grid ColumnDefinitions="Auto,*,Auto">
+                <StackPanel Orientation="Horizontal" Spacing="10">
+                    <Border Width="28" Height="28" CornerRadius="9" Background="#8B5CF6" VerticalAlignment="Center">
+                        <TextBlock Text="F" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <StackPanel Spacing="0">
+                        <TextBlock Text="Flow" FontSize="16" FontWeight="SemiBold" />
+                        <TextBlock Text="Avalonia technology lab" FontSize="11" Foreground="#9DA7BA" />
+                    </StackPanel>
+                </StackPanel>
+                <TextBlock Grid.Column="1" Text="10 folder tabs · virtualized image list" Foreground="#9DA7BA" VerticalAlignment="Center" HorizontalAlignment="Center" />
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
+                    <Button Classes="toolbar" Command="{Binding ToggleLayoutCommand}" Content="Grid / list" />
+                    <Button Classes="toolbar" Command="{Binding PinTabCommand}" CommandParameter="{Binding ActiveTab}" Content="Pin tab" />
+                    <Button Classes="toolbar" Command="{Binding OpenTerminalCommand}" Content="Open Terminal" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <Border Grid.Row="1" Background="#1C202A" BorderBrush="#292E3B" BorderThickness="0,0,0,1" Padding="12,8">
+            <StackPanel Orientation="Horizontal" Spacing="7">
+                <ItemsControl ItemsSource="{Binding Tabs}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate><StackPanel Orientation="Horizontal" Spacing="7" /></ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="models:FolderTab" x:CompileBindings="False">
+                            <Button Background="#282E3C" BorderBrush="#3A4355" BorderThickness="1" CornerRadius="8" Padding="10,6"
+                                    Command="{Binding DataContext.ActivateTabCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                    CommandParameter="{Binding}">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <TextBlock Text="{Binding IsPinned, StringFormat='⌖ '}" />
+                                    <TextBlock Text="{Binding Name}" MaxWidth="130" TextTrimming="CharacterEllipsis" />
+                                </StackPanel>
+                            </Button>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <Button Classes="toolbar" Command="{Binding AddTabCommand}" Content="+" FontWeight="Bold" />
+            </StackPanel>
+        </Border>
+
+        <Grid Grid.Row="2" ColumnDefinitions="220,*">
+            <Border Background="#171A22" Padding="16" BorderBrush="#292E3B" BorderThickness="0,0,1,0">
+                <StackPanel Spacing="7">
+                    <TextBlock Text="LOCATIONS" FontSize="11" FontWeight="Bold" Foreground="#7F899C" Margin="8,0,0,6" />
+                    <Button HorizontalContentAlignment="Left" Background="#2D3445" CornerRadius="8" Content="⌂  Home" />
+                    <Button HorizontalContentAlignment="Left" Background="Transparent" Content="▣  Pictures" />
+                    <Button HorizontalContentAlignment="Left" Background="Transparent" Content="⇩  Downloads" />
+                    <Button HorizontalContentAlignment="Left" Background="Transparent" Content="▱  Documents" />
+                    <Button HorizontalContentAlignment="Left" Background="Transparent" Content="★  Favorites" />
+                    <Border Height="1" Background="#292E3B" Margin="0,12" />
+                    <TextBlock Text="TEST CONTROLS" FontSize="11" FontWeight="Bold" Foreground="#7F899C" Margin="8,0,0,6" />
+                    <TextBlock Text="• 1,000 image records" Foreground="#C2C9D6" />
+                    <TextBlock Text="• virtual scroll enabled" Foreground="#C2C9D6" />
+                    <TextBlock Text="• no file mutations" Foreground="#C2C9D6" />
+                </StackPanel>
+            </Border>
+
+            <Grid Grid.Column="1" RowDefinitions="Auto,*" Margin="22">
+                <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,16">
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="{Binding ActiveFolder}" FontSize="25" FontWeight="SemiBold" />
+                        <TextBlock Text="Mock images for memory and scrolling tests" Foreground="#9DA7BA" />
+                    </StackPanel>
+                    <Border Grid.Column="1" Background="#232938" CornerRadius="10" Padding="12,8" VerticalAlignment="Center">
+                        <TextBlock Text="1,000 items" Foreground="#C7B6FF" />
+                    </Border>
+                </Grid>
+
+                <ListBox Grid.Row="1" Classes="file" ItemsSource="{Binding Files}" SelectionMode="Multiple">
+                    <ListBox.ItemsPanel>
+                        <ItemsPanelTemplate><VirtualizingStackPanel /></ItemsPanelTemplate>
+                    </ListBox.ItemsPanel>
+                    <ListBox.ItemTemplate>
+                        <DataTemplate x:DataType="models:FileItem">
+                            <Border Width="156" Height="178" Background="#202532" BorderBrush="#303849" BorderThickness="1" CornerRadius="12" Padding="10">
+                                <Grid RowDefinitions="*,Auto,Auto">
+                                    <Border Background="{Binding Accent}" CornerRadius="8" Opacity="0.86">
+                                        <TextBlock Text="▧" FontSize="35" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="#FFFFFF" />
+                                    </Border>
+                                    <TextBlock Grid.Row="1" Text="{Binding Name}" FontSize="12" Margin="0,9,0,2" TextTrimming="CharacterEllipsis" />
+                                    <Grid Grid.Row="2" ColumnDefinitions="*,Auto">
+                                        <TextBlock Text="{Binding Size}" FontSize="11" Foreground="#96A0B4" />
+                                        <TextBlock Grid.Column="1" Text="{Binding IsFavorite, StringFormat='★'}" Foreground="#FBBF24" />
+                                    </Grid>
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </Grid>
+        </Grid>
+
+        <Border Grid.Row="3" Background="#171A22" BorderBrush="#292E3B" BorderThickness="0,1,0,0" Padding="18,10">
+            <TextBlock Text="{Binding StatusMessage}" Foreground="#AAB3C3" FontSize="12" />
+        </Border>
+    </Grid>
+
+</Window>
