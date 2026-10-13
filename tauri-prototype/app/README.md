@@ -26,3 +26,5 @@ src-tauri/target/release/flow-files.exe
 ```
 
 不要提交 `node_modules`、`dist`、Rust `target`、本地环境变量、日志或安装包生成物。
+
+`app/.cargo/config.toml` 是当前电脑使用的 Cargo 镜像配置，只保留在本机，不进入 Git；GitHub CI 使用官方 crates.io。

@@ -6,6 +6,7 @@
 **/.vite/
 **/.turbo/
 **/coverage/
+**/.cargo/config.toml
 .vs/
 .vscode/
 .idea/
