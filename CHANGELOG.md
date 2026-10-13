@@ -4,6 +4,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- 外部打开路径测试改用规范化路径，避免 Windows 临时目录别名和大小写差异造成 CI 误报。
+
+### Changed
+
+- 本机 Cargo 镜像配置不再进入仓库，GitHub CI 使用官方 crates.io。
+
 ### Planned
 
 - 建立稳定的安装、覆盖升级和自动更新流程。

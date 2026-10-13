@@ -5578,14 +5578,24 @@ mod tests {
             &[sandbox.display().to_string(), sandbox.join("renamed.txt").display().to_string()],
             &sandbox,
         );
+        let canonical_sandbox = public_path(
+            &sandbox
+                .canonicalize()
+                .expect("canonicalize external target sandbox"),
+        );
         assert_eq!(external_targets.len(), 2);
         assert!(external_targets.iter().any(|target| {
-            target.directory.eq_ignore_ascii_case(&public_path(&sandbox))
+            target.directory.eq_ignore_ascii_case(&canonical_sandbox)
                 && target.selected_path.is_none()
         }));
-        let renamed_public_path = public_path(&sandbox.join("renamed.txt"));
+        let renamed_public_path = public_path(
+            &sandbox
+                .join("renamed.txt")
+                .canonicalize()
+                .expect("canonicalize selected external target"),
+        );
         assert!(external_targets.iter().any(|target| {
-            target.directory.eq_ignore_ascii_case(&public_path(&sandbox))
+            target.directory.eq_ignore_ascii_case(&canonical_sandbox)
                 && target.selected_path.as_deref() == Some(renamed_public_path.as_str())
         }));
         let mut claude_config = json!({
