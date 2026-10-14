@@ -59,6 +59,7 @@ export type SavedSearch = SearchProfile & { id: string; name: string };
 export type SearchProgress = { jobId: string; scanned: number; matches: number; currentPath: string };
 export type SearchProvider = "everything" | "native";
 export type SearchResult = { entries: FileEntry[]; scanned: number; cancelled: boolean; truncated: boolean; provider: SearchProvider };
+export type SearchResultMeta = Omit<SearchResult, "entries">;
 export type EverythingStatus = { installed: boolean; running: boolean; databaseLoaded: boolean; version: string | null; executable: string | null; indexedDrives: string[] };
 export type DuplicateScanProgress = { jobId: string; phase: "scanning" | "fingerprint" | "verifying"; scannedFiles: number; candidateFiles: number; processedBytes: number; currentPath: string };
 export type DuplicateGroup = { signature: string; fileSize: number; reclaimableBytes: number; files: SpaceScanItem[] };

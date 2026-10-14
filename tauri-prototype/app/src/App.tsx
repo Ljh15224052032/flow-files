@@ -24,7 +24,7 @@ import type {
   FolderSizeProgress, FolderSizeResult, FolderSizeState, FolderTab, Location, OperationIssue,
   OperationScanProgress, PathSuggestion, PendingTransfer, ResizableColumn, RetryTransfer,
   RunningOperation, SavedSearch, SearchDate, SearchHistoryItem, SearchKind, SearchProgress,
-  SearchProfile, SearchProvider, SearchResult, SearchSize, SelectionBox, SortDirection, SortKey,
+  SearchProfile, SearchResult, SearchResultMeta, SearchSize, SelectionBox, SortDirection, SortKey,
   SpaceCategoryAdvice, SpaceScanCategory,
   SpaceCleanupAge, SpaceCleanupPreview, SpaceScanItem, SpaceScanProgress, SpaceScanResult,
   SpaceScanSnapshot, Thumbnail, TransferTask, UiLanguage, UndoAction,
@@ -44,10 +44,11 @@ import {
   ActionsIcon, ChevronIcon, EntryIcon, FolderGlyph, SettingsIcon, SortIcon, SpaceHealthIcon,
   ViewIcon,
 } from "./components/Icons";
-import { formatDate, formatDuration, formatSize } from "./lib/format";
+import { formatDate, formatSize } from "./lib/format";
 import { PreviewContent } from "./components/PreviewContent";
 import { TaskCenter } from "./components/TaskCenter";
 import { ConflictDialog, DeleteConfirmationDialog, OperationIssuesDialog } from "./components/OperationDialogs";
+import { StatusBar } from "./components/StatusBar";
 import { UI_COPY } from "./localization";
 import { useAppUpdater } from "./hooks/useAppUpdater";
 import { prioritizeQueuedTask, retryableTaskPaths, type TaskFilter } from "./lib/task-utils";
@@ -197,7 +198,7 @@ function App() {
   const [searchResults, setSearchResults] = useState<FileEntry[] | null>(null);
   const [searching, setSearching] = useState(false);
   const [searchProgress, setSearchProgress] = useState<SearchProgress | null>(null);
-  const [searchResultMeta, setSearchResultMeta] = useState<{ scanned: number; cancelled: boolean; truncated: boolean; provider: SearchProvider } | null>(null);
+  const [searchResultMeta, setSearchResultMeta] = useState<SearchResultMeta | null>(null);
   const [preferEverything, setPreferEverything] = useState(() => localStorage.getItem(SEARCH_EVERYTHING_KEY) !== "false");
   const [everythingStatus, setEverythingStatus] = useState<EverythingStatus | null>(null);
   const [everythingStatusBusy, setEverythingStatusBusy] = useState(false);
@@ -3214,7 +3215,25 @@ function App() {
         </div>{previewPaneOpen && <aside className="preview-pane"><header><strong>{text.preview}</strong><button aria-label={text.close} onClick={togglePreviewPane}>×</button></header>{selected && selectedPaths.size === 1 ? <PreviewContent entry={selected} preview={preview} loading={previewLoading} language={language} copy={text} onOpen={() => void openEntry(selected)} onTextPage={(encoding, offset) => void loadTextPreviewPage(encoding, offset)} /> : <div className="preview-placeholder"><ViewIcon /><span>{text.quickViewHint}</span></div>}</aside>}</div>
       </section>
     </section>
-    <footer>{operation ? <div className="operation-status"><button className="operation-summary" onClick={() => setTaskCenterOpen(true)}><span>{operation.paused ? text.pause : operation.phase === "scanning" ? text.scanning : operation.mode === "copy" ? text.copying : text.moving} · {operation.currentName || (operation.phase === "scanning" ? operation.scannedItems : `${operation.completedItems}/${operation.totalItems}`)}</span></button><div className={`progress-track ${operation.phase === "scanning" ? "indeterminate" : ""}`}><i style={{ width: operation.phase === "scanning" ? "34%" : `${operation.totalBytes ? Math.min(100, operation.processedBytes / operation.totalBytes * 100) : 0}%` }} /></div><small>{operation.phase === "scanning" ? `${operation.scannedItems} ${text.scannedItems} · ${formatSize(operation.scannedBytes)}` : `${formatSize(operation.processedBytes)} / ${formatSize(operation.totalBytes)}${operation.speed > 0 && !operation.paused ? ` · ${formatSize(operation.speed)}/s · ${formatDuration((operation.totalBytes - operation.processedBytes) / operation.speed)}` : ""}`}</small><button onClick={() => void toggleOperationPaused()}>{operation.paused ? text.resume : text.pause}</button><button onClick={cancelOperation}>{text.cancel}</button></div> : searching ? <div className="search-operation-status"><span className="loading-dot">{text.searchAll}</span><span>{text.scanned} {searchProgress?.scanned ?? 0} · {searchProgress?.matches ?? 0} {text.matches}</span><small title={searchProgress?.currentPath}>{searchProgress?.currentPath}</small><button onClick={cancelDeepSearch}>{text.cancel}</button></div> : <><span className={isLoading ? "loading-dot" : ""}>{isLoading ? text.loading : text.ready}</span><span className="footer-message">{searchResults !== null && searchResultMeta ? `${searchResultMeta.provider === "everything" ? (language === "zh-CN" ? "Everything 索引" : "Everything index") : (language === "zh-CN" ? "本地扫描" : "Local scan")} · ${text.scanned} ${searchResultMeta.scanned}${searchResultMeta.truncated ? " · 20,000+" : searchResultMeta.cancelled ? ` · ${text.cancel}` : ""}` : status}</span>{latestUndo && <button className="footer-undo" disabled={undoBusy} title={`${latestUndo.label} · ${text.undoRetention}`} onClick={() => void undoLastOperation()}><span>{text.undo} · {latestUndo.label}</span><b>{undoStack.length}</b></button>}</>}<span className="item-count">{`${sortedEntries.length} ${text.shown}`}</span></footer>
+    <StatusBar
+      operation={operation}
+      searching={searching}
+      searchProgress={searchProgress}
+      searchResultMeta={searchResultMeta}
+      hasSearchResults={searchResults !== null}
+      isLoading={isLoading}
+      status={status}
+      latestUndo={latestUndo}
+      undoCount={undoStack.length}
+      undoBusy={undoBusy}
+      itemCount={sortedEntries.length}
+      language={language}
+      onOpenTasks={() => setTaskCenterOpen(true)}
+      onTogglePaused={() => void toggleOperationPaused()}
+      onCancelOperation={cancelOperation}
+      onCancelSearch={cancelDeepSearch}
+      onUndo={() => void undoLastOperation()}
+    />
     {taskCenterOpen && (
       <TaskCenter
         tasks={operationTasks}
