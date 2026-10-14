@@ -34,6 +34,8 @@ use tauri::{Emitter, Manager};
 
 mod path_policy;
 use path_policy::{is_inside, keep_both_path, validate_leaf_name};
+mod error_policy;
+use error_policy::{classify_operation_issue, directory_unavailable_reason};
 mod text_encoding;
 use text_encoding::decode_text_preview;
 mod transfer_rate;
@@ -535,48 +537,9 @@ fn app_error(message: impl Into<String>) -> String {
 
 fn operation_issue(path: &Path, message: impl Into<String>) -> OperationIssue {
     let message = message.into();
-    let normalized = message.to_lowercase();
-    let code = if normalized.contains("os error 5")
-        || normalized.contains("access is denied")
-        || normalized.contains("permission denied")
-    {
-        "accessDenied"
-    } else if normalized.contains("os error 32")
-        || normalized.contains("os error 33")
-        || normalized.contains("being used by another process")
-    {
-        "inUse"
-    } else if normalized.contains("os error 112")
-        || normalized.contains("not enough space")
-        || normalized.contains("disk full")
-    {
-        "diskFull"
-    } else if normalized.contains("os error 206")
-        || normalized.contains("filename or extension is too long")
-    {
-        "pathTooLong"
-    } else if normalized.contains("os error 21")
-        || normalized.contains("os error 53")
-        || normalized.contains("os error 55")
-        || normalized.contains("os error 64")
-        || normalized.contains("os error 1117")
-        || normalized.contains("os error 1167")
-        || normalized.contains("device is not ready")
-        || normalized.contains("device is not connected")
-        || normalized.contains("network")
-    {
-        "network"
-    } else if normalized.contains("os error 2")
-        || normalized.contains("os error 3")
-        || normalized.contains("not found")
-    {
-        "notFound"
-    } else {
-        "other"
-    };
     OperationIssue {
         path: public_path(path),
-        code: code.into(),
+        code: classify_operation_issue(&message).into(),
         message,
     }
 }
@@ -2622,16 +2585,6 @@ async fn recycle_space_cleanup_paths(
 #[cfg(windows)]
 fn is_reparse_point(metadata: &fs::Metadata) -> bool {
     metadata.file_attributes() & 0x400 != 0
-}
-
-fn directory_unavailable_reason(error: &std::io::Error, kind: &str) -> &'static str {
-    match error.raw_os_error() {
-        Some(5) => "accessDenied",
-        Some(2 | 3) => "notFound",
-        Some(21 | 53 | 55 | 64 | 67 | 121 | 1231) => "unreachable",
-        _ if kind == "network" => "unreachable",
-        _ => "unknown",
-    }
 }
 
 #[cfg(not(windows))]
