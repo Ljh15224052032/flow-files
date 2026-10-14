@@ -12,6 +12,14 @@
 
 脚本必须全部通过：四处版本号一致、前端测试、生产构建、Rust 后端测试以及 `git diff --check`。只排查前端问题时可以临时使用 `-SkipRust`，但它不能作为发布依据。
 
+生成本机签名候选安装包时运行：
+
+```powershell
+.\tools\Build-SignedInstaller.ps1
+```
+
+脚本从当前用户的 `.tauri` 目录读取私钥和 DPAPI 加密的密码备份，密钥只进入构建进程环境，不打印也不写入仓库。输出会列出安装包、更新签名和 SHA-256。该签名用于 Tauri 更新器验证；Windows 安装包本身若未配置代码签名证书，仍可能显示 SmartScreen 提示。
+
 ## 2. 测试环境
 
 为避免影响日常使用，优先在 Windows Sandbox、测试账户或虚拟机执行。实机测试前先退出正在运行的 Flow Files，并备份以下数据：
