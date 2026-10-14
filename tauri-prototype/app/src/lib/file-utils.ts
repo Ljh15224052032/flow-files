@@ -34,6 +34,15 @@ export function joinWindowsPath(parent: string, name: string) {
   return `${parent.replace(/[\\/]+$/, "")}\\${name}`;
 }
 
+export function parentDirectory(path: string) {
+  const normalized = path.replace(/[\\/]+$/, "");
+  if (/^\\\\[^\\]+\\[^\\]+$/.test(normalized)) return normalized;
+  const separator = normalized.lastIndexOf("\\");
+  if (/^[A-Za-z]:/.test(normalized) && separator <= 2) return `${normalized.slice(0, 2)}\\`;
+  if (separator < 0) return normalized;
+  return normalized.slice(0, separator);
+}
+
 export function batchNameFor(entry: FileEntry, draft: BatchRenameDraft, index: number, total: number) {
   const dot = entry.isDirectory ? -1 : entry.name.lastIndexOf(".");
   const stem = dot > 0 ? entry.name.slice(0, dot) : entry.name;

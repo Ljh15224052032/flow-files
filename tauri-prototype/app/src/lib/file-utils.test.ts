@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { FileEntry } from "../types";
 import {
   batchNameFor, directoryKindForPath, displayName, iconKindFor, labelForPath, nativeDropMode,
-  pathCrumbs, sortEntriesForView, typeLabelFor, volumeKey,
+  parentDirectory, pathCrumbs, sortEntriesForView, typeLabelFor, volumeKey,
 } from "./file-utils";
 
 function entry(name: string, options: Partial<FileEntry> = {}): FileEntry {
@@ -47,6 +47,10 @@ describe("Windows path helpers", () => {
       { label: "folder", path: "\\\\server\\share\\folder" },
     ]);
     expect(labelForPath("D:\\projects\\flow\\")).toBe("flow");
+    expect(parentDirectory("D:\\projects\\flow")).toBe("D:\\projects");
+    expect(parentDirectory("D:\\file.txt")).toBe("D:\\");
+    expect(parentDirectory("\\\\server\\share")).toBe("\\\\server\\share");
+    expect(parentDirectory("\\\\server\\share\\folder")).toBe("\\\\server\\share");
   });
 });
 

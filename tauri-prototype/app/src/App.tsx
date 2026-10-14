@@ -31,7 +31,7 @@ import type {
 } from "./types";
 import {
   batchNameFor, directoryKindForPath, displayName, iconKindFor, isThumbnailCandidate,
-  joinWindowsPath, labelForPath, localizedLocation, nativeDropMode, pathCrumbs,
+  joinWindowsPath, labelForPath, localizedLocation, nativeDropMode, parentDirectory, pathCrumbs,
   sortEntriesForView, typeLabelFor,
 } from "./lib/file-utils";
 import {
@@ -46,6 +46,7 @@ import {
 import { formatDate, formatDuration, formatSize } from "./lib/format";
 import { PreviewContent } from "./components/PreviewContent";
 import { TaskCenter } from "./components/TaskCenter";
+import { ConflictDialog, DeleteConfirmationDialog, OperationIssuesDialog } from "./components/OperationDialogs";
 import { UI_COPY } from "./localization";
 import { useAppUpdater } from "./hooks/useAppUpdater";
 import { prioritizeQueuedTask, retryableTaskPaths, type TaskFilter } from "./lib/task-utils";
@@ -104,13 +105,6 @@ function unavailableLocationCopy(status: DirectoryStatus, language: UiLanguage) 
   if (status.reason === "unreachable") return { title: status.kind === "network" ? "Network location is unreachable" : "Drive is unreachable", detail: "Check the device, network, or VPN. Flow Files retries every 8 seconds." };
   if (status.reason === "timeout") return { title: "Location check timed out", detail: "The check continues in the background with a longer retry interval, without blocking file browsing." };
   return { title: status.kind === "network" ? "Network location unavailable" : "Drive or folder disconnected", detail: "The current view is preserved. Flow Files retries every 8 seconds." };
-}
-
-function operationIssueLabel(code: OperationIssue["code"], language: UiLanguage) {
-  const labels = language === "zh-CN"
-    ? { accessDenied: "没有访问权限", inUse: "文件正在被其他程序使用", diskFull: "磁盘空间不足", pathTooLong: "路径过长", network: "网络位置不可用", notFound: "文件已不存在", other: "文件系统错误" }
-    : { accessDenied: "Access denied", inUse: "File is in use", diskFull: "Not enough disk space", pathTooLong: "Path is too long", network: "Network location unavailable", notFound: "Item no longer exists", other: "File system error" };
-  return labels[code];
 }
 
 function spaceCategoryLabel(id: string, language: UiLanguage) {
@@ -349,7 +343,6 @@ function App() {
   const activeTaskCount = operationTasks.filter((task) => ["queued", "running", "paused"].includes(task.status)).length;
   const recoveredTaskCount = operationTasks.filter((task) => task.recoveredFromRestart).length;
   const undoAction = latestUndo?.action ?? null;
-  const currentConflict = pendingTransfer?.conflicts[pendingTransfer.currentIndex] ?? null;
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? null;
   const contextTab = tabContextMenu ? tabs.find((tab) => tab.id === tabContextMenu.tabId) ?? null : null;
   const currentLocation = locations.find((location) => location.path.toLocaleLowerCase() === listing?.path.toLocaleLowerCase());
@@ -1598,6 +1591,14 @@ function App() {
     void startTransfer({ mode: task.mode, paths }, task.destination, task.conflict, task.conflictResolutions);
   }
 
+  function retryAllTransferIssues() {
+    const retry = retryTransfer;
+    if (!retry) return;
+    setOperationIssues([]);
+    setRetryTransfer(null);
+    void startTransfer(retry.clipboard, retry.destination, retry.conflict, retry.conflictResolutions);
+  }
+
   async function retrySingleTransferIssue(issue: OperationIssue) {
     const retry = retryTransfer;
     if (!retry || !retry.clipboard.paths.some((path) => path.toLocaleLowerCase() === issue.path.toLocaleLowerCase())) return;
@@ -1735,13 +1736,6 @@ function App() {
       setStatus(language === "zh-CN" ? `已撤销：${latestUndo.label}` : `Undid: ${latestUndo.label}`);
     } catch (error) { setStatus(language === "zh-CN" ? `无法撤销：${String(error)}` : `Could not undo: ${String(error)}`); }
     finally { setUndoBusy(false); }
-  }
-
-  function parentDirectory(path: string) {
-    const normalized = path.replace(/[\\/]+$/, "");
-    const separator = normalized.lastIndexOf("\\");
-    if (separator < 2) return `${normalized.slice(0, 2)}\\`;
-    return normalized.slice(0, separator);
   }
 
   function clearTabHover() {
@@ -3220,9 +3214,34 @@ function App() {
         onClearFinished={() => setOperationTasks((current) => current.filter((task) => !["completed", "cancelled", "failed"].includes(task.status)))}
       />
     )}
-    {pendingTransfer && currentConflict && <div className="settings-backdrop"><section className="settings-panel conflict-panel" role="dialog" aria-modal="true" aria-labelledby="conflict-title"><header><div><h2 id="conflict-title">{text.conflictTitle}</h2><p>{text.conflictProgress} {pendingTransfer.currentIndex + 1} / {pendingTransfer.conflicts.length} · {text.conflictIntro}</p></div><button className="settings-close" aria-label={text.cancel} onClick={() => setPendingTransfer(null)}>×</button></header><div className="conflict-compare"><article><span>{text.sourceItem}</span><div><i className={`entry-icon ${iconKindFor(currentConflict.source)}-icon`}><EntryIcon entry={currentConflict.source} /></i><strong title={currentConflict.source.path}>{currentConflict.source.name}</strong></div><small>{currentConflict.source.isDirectory ? text.folder : formatSize(currentConflict.source.size)} · {formatDate(currentConflict.source.modifiedUnixSeconds, language)}</small><em title={currentConflict.source.path}>{parentDirectory(currentConflict.source.path)}</em></article><article><span>{text.targetItem}</span><div><i className={`entry-icon ${iconKindFor(currentConflict.target)}-icon`}><EntryIcon entry={currentConflict.target} /></i><strong title={currentConflict.target.path}>{currentConflict.target.name}</strong></div><small>{currentConflict.target.isDirectory ? text.folder : formatSize(currentConflict.target.size)} · {formatDate(currentConflict.target.modifiedUnixSeconds, language)}</small><em title={currentConflict.target.path}>{parentDirectory(currentConflict.target.path)}</em></article></div>{pendingTransfer.conflicts.length - pendingTransfer.currentIndex > 1 && <label className="conflict-apply"><input type="checkbox" checked={applyConflictToRemaining} onChange={(event) => setApplyConflictToRemaining(event.target.checked)} /><span>{text.applyRemaining}</span></label>}<p className="conflict-warning">{text.replaceNoUndo}</p><div className="conflict-actions"><button onClick={() => setPendingTransfer(null)}>{text.cancel}</button><button onClick={() => resolveCurrentConflict("skip")}>{text.skip}</button><button onClick={() => resolveCurrentConflict("keepBoth")}>{text.keepBoth}</button><button className="primary" onClick={() => resolveCurrentConflict("replace")}>{text.replace}</button></div></section></div>}
-    {operationIssues.length > 0 && <div className="settings-backdrop"><section className="settings-panel issue-panel" role="dialog" aria-modal="true" aria-labelledby="issue-title"><header><div><h2 id="issue-title">{text.issueTitle}</h2><p>{text.issueIntro}</p></div><button className="settings-close" aria-label={text.close} onClick={() => setOperationIssues([])}>×</button></header><div className="issue-list">{operationIssues.map((issue, index) => { const canRetrySingle = retryTransfer?.clipboard.paths.some((path) => path.toLocaleLowerCase() === issue.path.toLocaleLowerCase()); return <article key={`${issue.path}-${index}`}><strong>{operationIssueLabel(issue.code, language)}</strong><span title={issue.path}>{issue.path}</span><small>{issue.message}</small>{canRetrySingle && <button onClick={() => void retrySingleTransferIssue(issue)}>{language === "zh-CN" ? "仅重试此项" : "Retry this item"}</button>}</article>; })}</div><div className="settings-footer issue-footer">{retryTransfer && <button className="secondary" onClick={() => { const retry = retryTransfer; setOperationIssues([]); setRetryTransfer(null); void startTransfer(retry.clipboard, retry.destination, retry.conflict, retry.conflictResolutions); }}>{text.retryFailed}</button>}<button onClick={() => setOperationIssues([])}>{text.close}</button></div></section></div>}
-    {deleteRequest && <div className="settings-backdrop"><section className="settings-panel delete-panel" role="alertdialog" aria-modal="true" aria-labelledby="delete-title"><header><div><h2 id="delete-title">{deleteRequest.permanent ? text.permanentDeleteTitle : text.deleteTitle}</h2><p>{deleteRequest.permanent ? text.permanentWarning : text.deleteWarning}</p></div><button className="settings-close" aria-label={text.cancel} onClick={() => setDeleteRequest(null)}>×</button></header><div className="delete-list">{deleteRequest.names.slice(0, 5).map((name, index) => <span key={`${name}-${index}`} title={name}>{name}</span>)}{deleteRequest.names.length > 5 && <small>{language === "zh-CN" ? `另有 ${deleteRequest.names.length - 5} 个项目` : `${deleteRequest.names.length - 5} more item(s)`}</small>}</div><div className="conflict-actions"><button onClick={() => setDeleteRequest(null)}>{text.cancel}</button><button className={deleteRequest.permanent ? "danger-primary" : "primary"} onClick={() => void confirmDeleteRequest()}>{deleteRequest.permanent ? text.confirmPermanentDelete : text.confirmDelete}</button></div></section></div>}
+    {pendingTransfer && (
+      <ConflictDialog
+        pending={pendingTransfer}
+        applyToRemaining={applyConflictToRemaining}
+        language={language}
+        onApplyToRemainingChange={setApplyConflictToRemaining}
+        onCancel={() => setPendingTransfer(null)}
+        onResolve={resolveCurrentConflict}
+      />
+    )}
+    {operationIssues.length > 0 && (
+      <OperationIssuesDialog
+        issues={operationIssues}
+        retry={retryTransfer}
+        language={language}
+        onClose={() => setOperationIssues([])}
+        onRetryAll={retryAllTransferIssues}
+        onRetryIssue={(issue) => void retrySingleTransferIssue(issue)}
+      />
+    )}
+    {deleteRequest && (
+      <DeleteConfirmationDialog
+        request={deleteRequest}
+        language={language}
+        onCancel={() => setDeleteRequest(null)}
+        onConfirm={() => void confirmDeleteRequest()}
+      />
+    )}
     {batchRenameOpen && <div className="settings-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !archiveBusy) setBatchRenameOpen(false); }}><section className="settings-panel batch-rename-panel" role="dialog" aria-modal="true" aria-labelledby="batch-rename-title"><header><div><h2 id="batch-rename-title">{text.batchRenameTitle}</h2><p>{text.batchRenameIntro}</p></div><button className="settings-close" disabled={archiveBusy} aria-label={text.cancel} onClick={() => setBatchRenameOpen(false)}>×</button></header><div className="batch-rename-fields"><label><span>{text.findText}</span><input autoFocus value={batchRenameDraft.find} onChange={(event) => setBatchRenameDraft((draft) => ({ ...draft, find: event.target.value }))} /></label><label><span>{text.replaceWith}</span><input value={batchRenameDraft.replace} onChange={(event) => setBatchRenameDraft((draft) => ({ ...draft, replace: event.target.value }))} /></label><label><span>{text.prefix}</span><input value={batchRenameDraft.prefix} onChange={(event) => setBatchRenameDraft((draft) => ({ ...draft, prefix: event.target.value }))} /></label><label><span>{text.suffix}</span><input value={batchRenameDraft.suffix} onChange={(event) => setBatchRenameDraft((draft) => ({ ...draft, suffix: event.target.value }))} /></label><label className="numbering-field"><span>{text.addNumbers}</span><button className={`switch ${batchRenameDraft.addNumbers ? "on" : ""}`} role="switch" aria-checked={batchRenameDraft.addNumbers} onClick={() => setBatchRenameDraft((draft) => ({ ...draft, addNumbers: !draft.addNumbers }))}><span /></button></label><label><span>{text.startAt}</span><input type="number" min="0" max="999999" disabled={!batchRenameDraft.addNumbers} value={batchRenameDraft.startNumber} onChange={(event) => setBatchRenameDraft((draft) => ({ ...draft, startNumber: Math.max(0, Number(event.target.value) || 0) }))} /></label></div><div className="batch-preview"><strong>{text.previewChanges}</strong>{batchRenamePreview.slice(0, 12).map(({ entry, name }) => <div key={entry.path}><span title={entry.name}>{entry.name}</span><b>→</b><span title={name}>{name}</span></div>)}{batchRenamePreview.length > 12 && <small>{language === "zh-CN" ? `另有 ${batchRenamePreview.length - 12} 个项目` : `${batchRenamePreview.length - 12} more item(s)`}</small>}</div>{batchRenameError && <div className="batch-rename-error">{batchRenameError}</div>}<div className="conflict-actions"><button disabled={archiveBusy} onClick={() => setBatchRenameOpen(false)}>{text.cancel}</button><button className="primary" disabled={archiveBusy} onClick={() => void applyBatchRename()}>{archiveBusy ? text.loading : text.applyRename}</button></div></section></div>}
     {spaceHealthOpen && renderSpaceHealth()}
     {quickPreviewOpen && selected && selectedPaths.size === 1 && <div className="quick-preview-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setQuickPreviewOpen(false); }}><section className="quick-preview" role="dialog" aria-modal="true" aria-label={text.preview}><button className="quick-preview-close" aria-label={text.close} onClick={() => setQuickPreviewOpen(false)}>×</button><PreviewContent entry={selected} preview={preview} loading={previewLoading} language={language} copy={text} onOpen={() => { setQuickPreviewOpen(false); void openEntry(selected); }} onTextPage={(encoding, offset) => void loadTextPreviewPage(encoding, offset)} /></section></div>}
