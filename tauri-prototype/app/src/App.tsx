@@ -7,7 +7,8 @@ import "./App.css";
 import {
   CLAUDE_FULL_ACCESS_KEY, CLAUDE_PROVIDER_KEY, COLUMN_WIDTHS_KEY, DEFAULT_COLUMN_WIDTHS,
   DEFAULT_LIST_VIEWPORT_HEIGHT, FAVORITES_KEY, FAVORITE_COLLAPSE_KEY, LANGUAGE_KEY,
-  MAX_CACHED_FILE_ICONS, MAX_CACHED_THUMBNAILS, MAX_UNDO_STEPS, OPERATION_TASKS_KEY,
+  MAX_CACHED_FILE_ICONS, MAX_CACHED_THUMBNAILS, MAX_UNDO_STEPS, OPERATION_RATE_LIMIT_KEY,
+  OPERATION_RATE_LIMITS, OPERATION_TASKS_KEY,
   PREVIEW_PANE_KEY, RECENT_PATHS_KEY, SAVED_SEARCHES_KEY, SEARCH_EVERYTHING_KEY,
   SEARCH_HISTORY_KEY, SESSION_KEY, SHOW_EXTENSIONS_KEY, SHOW_HIDDEN_KEY, SORT_DIRECTION_KEY,
   SORT_KEY, UNDO_RETENTION_MS, UNDO_STACK_KEY,
@@ -285,6 +286,10 @@ function App() {
   const [undoBusy, setUndoBusy] = useState(false);
   const [operation, setOperation] = useState<RunningOperation | null>(null);
   const [operationTasks, setOperationTasks] = useState<TransferTask[]>(readStoredOperationTasks);
+  const [operationRateLimit, setOperationRateLimit] = useState(() => {
+    const stored = Number(localStorage.getItem(OPERATION_RATE_LIMIT_KEY));
+    return OPERATION_RATE_LIMITS.some((value) => value === stored) ? stored : 0;
+  });
   const [taskCenterOpen, setTaskCenterOpen] = useState(false);
   const [taskFilter, setTaskFilter] = useState<TaskFilter>("all");
   const [operationIssues, setOperationIssues] = useState<OperationIssue[]>([]);
@@ -1625,7 +1630,7 @@ function App() {
     });
     try {
       const result = await invoke<FileOperationResult>("run_file_operation", {
-        request: { jobId: task.jobId, sources: task.sourcePaths, destination: task.destination, mode: task.mode, conflict: task.conflict, conflictResolutions: task.conflictResolutions },
+        request: { jobId: task.jobId, sources: task.sourcePaths, destination: task.destination, mode: task.mode, conflict: task.conflict, conflictResolutions: task.conflictResolutions, rateLimitBytesPerSecond: operationRateLimit },
       });
       if (result.undo) pushUndo(result.undo, language === "zh-CN" ? `${task.mode === "copy" ? "复制" : "移动"} ${result.completed} 项` : `${task.mode === "copy" ? "Copy" : "Move"} ${result.completed} item(s)`);
       if (result.issues.length) {
@@ -1694,6 +1699,16 @@ function App() {
     await invoke("set_file_operation_paused", { jobId: operation.jobId, paused });
     setOperation((current) => current?.jobId === operation.jobId ? { ...current, paused } : current);
     setOperationTasks((current) => current.map((task) => task.jobId === operation.jobId ? { ...task, paused, status: paused ? "paused" : "running" } : task));
+  }
+
+  function changeOperationRateLimit(bytesPerSecond: number) {
+    if (!OPERATION_RATE_LIMITS.some((value) => value === bytesPerSecond)) return;
+    setOperationRateLimit(bytesPerSecond);
+    localStorage.setItem(OPERATION_RATE_LIMIT_KEY, String(bytesPerSecond));
+    if (operation) {
+      void invoke("set_file_operation_rate_limit", { jobId: operation.jobId, bytesPerSecond })
+        .catch((error) => setStatus(language === "zh-CN" ? `无法调整任务速度：${String(error)}` : `Could not change task speed: ${String(error)}`));
+    }
   }
 
   function recycleSelection() {
@@ -3205,8 +3220,10 @@ function App() {
         tasks={operationTasks}
         filter={taskFilter}
         language={language}
+        rateLimit={operationRateLimit}
         onClose={() => setTaskCenterOpen(false)}
         onFilterChange={setTaskFilter}
+        onRateLimitChange={changeOperationRateLimit}
         onPrioritize={prioritizeTask}
         onTogglePaused={() => void toggleOperationPaused()}
         onCancel={cancelTask}

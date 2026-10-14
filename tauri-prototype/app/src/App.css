@@ -797,6 +797,8 @@ footer { position: relative; z-index: 2; display: flex; min-width: 0; min-height
 .task-center > header span { color: var(--muted); font-size: 11px; }
 .task-center > header button { width: 28px; height: 28px; border: 0; border-radius: 7px; background: transparent; color: var(--muted-strong); font-size: 19px; }
 .task-center > header button:hover { background: var(--hover); color: var(--text-strong); }
+.task-rate-limit { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+.task-rate-limit select { height: 28px; border: 1px solid var(--border-strong); border-radius: 7px; background: var(--surface); padding: 0 24px 0 8px; color: var(--text); font: inherit; font-size: 10px; }
 .task-filters { display: flex; gap: 5px; overflow-x: auto; border-bottom: 1px solid var(--border); padding: 8px 10px; }
 .task-filters button { display: flex; min-height: 28px; align-items: center; gap: 6px; border: 1px solid transparent; border-radius: 7px; background: transparent; padding: 0 8px; color: var(--muted-strong); font-size: 10px; white-space: nowrap; }
 .task-filters button:hover { background: var(--hover); color: var(--text); }

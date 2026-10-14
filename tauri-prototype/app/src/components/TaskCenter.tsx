@@ -7,8 +7,10 @@ type TaskCenterProps = {
   tasks: TransferTask[];
   filter: TaskFilter;
   language: UiLanguage;
+  rateLimit: number;
   onClose: () => void;
   onFilterChange: (filter: TaskFilter) => void;
+  onRateLimitChange: (bytesPerSecond: number) => void;
   onPrioritize: (task: TransferTask) => void;
   onTogglePaused: () => void;
   onCancel: (task: TransferTask) => void;
@@ -24,8 +26,10 @@ export function TaskCenter({
   tasks,
   filter,
   language,
+  rateLimit,
   onClose,
   onFilterChange,
+  onRateLimitChange,
   onPrioritize,
   onTogglePaused,
   onCancel,
@@ -52,6 +56,15 @@ export function TaskCenter({
             {recoveredCount ? ` · ${recoveredCount} ${language === "zh-CN" ? "项待恢复" : "to recover"}` : ""}
           </span>
         </div>
+        <label className="task-rate-limit">
+          <span>{language === "zh-CN" ? "速度" : "Speed"}</span>
+          <select value={rateLimit} onChange={(event) => onRateLimitChange(Number(event.target.value))}>
+            <option value={0}>{language === "zh-CN" ? "无限制" : "Unlimited"}</option>
+            <option value={10 * 1024 * 1024}>10 MB/s</option>
+            <option value={50 * 1024 * 1024}>50 MB/s</option>
+            <option value={100 * 1024 * 1024}>100 MB/s</option>
+          </select>
+        </label>
         <button aria-label={text.close} onClick={onClose}>×</button>
       </header>
 

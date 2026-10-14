@@ -36,6 +36,8 @@ mod path_policy;
 use path_policy::{is_inside, keep_both_path, validate_leaf_name};
 mod text_encoding;
 use text_encoding::decode_text_preview;
+mod transfer_rate;
+use transfer_rate::target_elapsed;
 #[cfg(windows)]
 use windows::{
     core::{w, PCSTR, PCWSTR, PWSTR},
@@ -307,6 +309,7 @@ struct DuplicateCleanupRequest {
 struct OperationControl {
     cancelled: AtomicBool,
     paused: AtomicBool,
+    rate_limit_bytes_per_second: AtomicU64,
 }
 
 #[derive(Default)]
@@ -460,6 +463,8 @@ struct FileOperationRequest {
     conflict: String,
     #[serde(default)]
     conflict_resolutions: Vec<ConflictResolution>,
+    #[serde(default)]
+    rate_limit_bytes_per_second: u64,
 }
 
 #[derive(Deserialize)]
@@ -1195,6 +1200,8 @@ struct ProgressContext {
     current_name: String,
     scanned_items: usize,
     scanned_bytes: u64,
+    throttle_window_started: Instant,
+    throttle_window_bytes: u64,
 }
 
 impl ProgressContext {
@@ -1232,6 +1239,42 @@ impl ProgressContext {
             },
         );
     }
+
+    fn throttle(&mut self, bytes: u64) -> Result<(), String> {
+        let limit = self
+            .control
+            .rate_limit_bytes_per_second
+            .load(Ordering::Relaxed);
+        if limit == 0 {
+            self.throttle_window_started = Instant::now();
+            self.throttle_window_bytes = 0;
+            return Ok(());
+        }
+
+        let now = Instant::now();
+        if now.duration_since(self.throttle_window_started) >= Duration::from_secs(1) {
+            self.throttle_window_started = now;
+            self.throttle_window_bytes = 0;
+        }
+        self.throttle_window_bytes = self.throttle_window_bytes.saturating_add(bytes);
+        let target = target_elapsed(self.throttle_window_bytes, limit);
+        loop {
+            if self.cancelled() {
+                return Err(app_error("Operation cancelled."));
+            }
+            if self.control.paused.load(Ordering::Relaxed) {
+                self.checkpoint()?;
+                self.throttle_window_started = Instant::now();
+                self.throttle_window_bytes = 0;
+                return Ok(());
+            }
+            let elapsed = self.throttle_window_started.elapsed();
+            if elapsed >= target {
+                return Ok(());
+            }
+            thread::sleep((target - elapsed).min(Duration::from_millis(50)));
+        }
+    }
 }
 
 fn copy_file_with_progress(
@@ -1257,6 +1300,7 @@ fn copy_file_with_progress(
             .write_all(&buffer[..read])
             .map_err(|error| app_error(error.to_string()))?;
         progress.processed_bytes = progress.processed_bytes.saturating_add(read as u64);
+        progress.throttle(read as u64)?;
         progress.emit();
     }
     if let Ok(metadata) = fs::metadata(source) {
@@ -3907,7 +3951,10 @@ async fn run_file_operation(
         }
     }
 
-    let control = Arc::new(OperationControl::default());
+    let control = Arc::new(OperationControl {
+        rate_limit_bytes_per_second: AtomicU64::new(request.rate_limit_bytes_per_second),
+        ..OperationControl::default()
+    });
     jobs.0
         .lock()
         .map_err(|_| app_error("Operation state is unavailable."))?
@@ -4000,6 +4047,8 @@ async fn run_file_operation(
             current_name: String::new(),
             scanned_items: scan.scanned_items,
             scanned_bytes: scan.scanned_bytes,
+            throttle_window_started: Instant::now(),
+            throttle_window_bytes: 0,
         };
         progress.emit();
         let mut completed_targets = Vec::new();
@@ -4169,6 +4218,24 @@ fn set_file_operation_paused(
         .map_err(|_| app_error("Operation state is unavailable."))?;
     if let Some(control) = jobs.get(&job_id) {
         control.paused.store(paused, Ordering::Relaxed);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn set_file_operation_rate_limit(
+    jobs: tauri::State<'_, OperationJobs>,
+    job_id: String,
+    bytes_per_second: u64,
+) -> Result<(), String> {
+    let jobs = jobs
+        .0
+        .lock()
+        .map_err(|_| app_error("Operation state is unavailable."))?;
+    if let Some(control) = jobs.get(&job_id) {
+        control
+            .rate_limit_bytes_per_second
+            .store(bytes_per_second, Ordering::Relaxed);
     }
     Ok(())
 }
@@ -5509,6 +5576,7 @@ pub fn run() {
             run_file_operation,
             cancel_file_operation,
             set_file_operation_paused,
+            set_file_operation_rate_limit,
             recycle_paths,
             permanently_delete_paths,
             undo_operation,
