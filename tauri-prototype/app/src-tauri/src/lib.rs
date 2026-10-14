@@ -32,6 +32,9 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tauri::{Emitter, Manager};
+
+mod path_policy;
+use path_policy::{is_inside, keep_both_path, validate_leaf_name};
 #[cfg(windows)]
 use windows::{
     core::{w, PCSTR, PCWSTR, PWSTR},
@@ -1093,44 +1096,6 @@ fn trust_claude_workspace(path: &str) -> Result<(), String> {
     result
 }
 
-fn validate_leaf_name(name: &str) -> Result<(), String> {
-    let trimmed = name.trim();
-    if trimmed.is_empty() || trimmed == "." || trimmed == ".." {
-        return Err(app_error("Enter a valid name."));
-    }
-    if trimmed != name || trimmed.ends_with('.') {
-        return Err(app_error(
-            "Windows names cannot end with a space or period.",
-        ));
-    }
-    if trimmed.chars().any(|character| {
-        matches!(
-            character,
-            '\\' | '/' | ':' | '*' | '?' | '"' | '<' | '>' | '|'
-        ) || character < ' '
-    }) {
-        return Err(app_error(
-            "Windows names cannot contain \\ / : * ? \" < > |.",
-        ));
-    }
-    let stem = trimmed
-        .split('.')
-        .next()
-        .unwrap_or(trimmed)
-        .to_ascii_uppercase();
-    let reserved = matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
-        || (stem.len() == 4
-            && (stem.starts_with("COM") || stem.starts_with("LPT"))
-            && matches!(stem.as_bytes()[3], b'1'..=b'9'));
-    if reserved {
-        return Err(app_error("This name is reserved by Windows."));
-    }
-    if trimmed.encode_utf16().count() > 255 {
-        return Err(app_error("The name is too long."));
-    }
-    Ok(())
-}
-
 fn remove_path(path: &Path) -> Result<(), String> {
     if !path.exists() {
         return Ok(());
@@ -1216,29 +1181,6 @@ fn scan_path_size(path: &Path, scan: &mut ScanContext) -> Result<u64, String> {
         }
     }
     Ok(size)
-}
-
-fn keep_both_path(target: &Path) -> PathBuf {
-    if !target.exists() {
-        return target.to_path_buf();
-    }
-    let parent = target.parent().unwrap_or_else(|| Path::new(""));
-    let stem = target
-        .file_stem()
-        .and_then(|value| value.to_str())
-        .unwrap_or("item");
-    let extension = target.extension().and_then(|value| value.to_str());
-    for index in 2..10_000 {
-        let name = match extension {
-            Some(extension) if target.is_file() => format!("{stem} ({index}).{extension}"),
-            _ => format!("{stem} ({index})"),
-        };
-        let candidate = parent.join(name);
-        if !candidate.exists() {
-            return candidate;
-        }
-    }
-    parent.join(format!("{stem}-copy"))
 }
 
 struct ProgressContext {
@@ -1382,16 +1324,6 @@ fn copy_path_plain(source: &Path, target: &Path) -> Result<(), String> {
     } else {
         Err(app_error("This item type cannot be copied."))
     }
-}
-
-fn is_inside(source: &Path, destination: &Path) -> bool {
-    let source = source
-        .canonicalize()
-        .unwrap_or_else(|_| source.to_path_buf());
-    let destination = destination
-        .canonicalize()
-        .unwrap_or_else(|_| destination.to_path_buf());
-    destination.starts_with(source)
 }
 
 fn is_supported_image(path: &Path) -> bool {
