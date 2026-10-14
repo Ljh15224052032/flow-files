@@ -49,6 +49,7 @@ button:disabled { cursor: default; opacity: .4; }
 .space-health-button svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.45; stroke-linecap: round; stroke-linejoin: round; }
 .top-actions .task-center-button { position: relative; display: grid; width: 36px; place-items: center; padding: 0; font-size: 17px; }
 .task-center-button.busy::after { position: absolute; top: 6px; right: 6px; width: 6px; height: 6px; border-radius: 50%; background: #d4d4d4; content: ""; }
+.task-center-button.recovery::after { background: #bd9c72; }
 .task-center-button b { position: absolute; top: -6px; right: -6px; min-width: 17px; border: 2px solid var(--topbar); border-radius: 999px; background: #e1e1e1; padding: 0 4px; color: #242424; font-size: 10px; line-height: 14px; }
 
 .tabbar { display: flex; align-items: center; gap: 7px; overflow-x: auto; overflow-y: hidden; padding: 8px 12px; border-width: 0 0 1px; background: var(--sidebar); scrollbar-width: none; }
@@ -790,6 +791,8 @@ footer { position: relative; z-index: 2; display: flex; min-width: 0; min-height
 .task-item { display: grid; gap: 8px; border: 1px solid var(--border); border-radius: 9px; background: #1b1b1b; padding: 11px 12px; }
 .task-item.running, .task-item.paused { border-color: #4a4a4a; background: #242424; }
 .task-item.failed { border-color: #60413e; }
+.task-item.recovered { border-color: #65543f; background: #211e1a; }
+.task-recovery-note { margin: 0; color: #aa967e; font-size: 10px; line-height: 1.45; }
 .task-item.cancelled, .task-item.completed { opacity: .72; }
 .task-title, .task-meta, .task-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .task-title strong { overflow: hidden; color: #dedede; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }

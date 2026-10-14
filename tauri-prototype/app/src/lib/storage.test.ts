@@ -53,6 +53,7 @@ describe("persisted Flow Files state", () => {
     const [task] = readStoredOperationTasks();
     expect(task.status).toBe("failed");
     expect(task.error).toContain("closed before this task completed");
+    expect(task.recoveredFromRestart).toBe(true);
     expect(task.processedBytes).toBe(50);
     expect(task.sourcePaths).toEqual(["C:\\source.txt"]);
   });

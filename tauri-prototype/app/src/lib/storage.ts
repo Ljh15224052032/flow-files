@@ -173,6 +173,7 @@ export function readStoredOperationTasks(): TransferTask[] {
         currentName: typeof candidate.currentName === "string" ? candidate.currentName : "", phase: candidate.phase === "transfer" ? "transfer" : "scanning",
         scannedItems: typeof candidate.scannedItems === "number" ? candidate.scannedItems : 0, scannedBytes: typeof candidate.scannedBytes === "number" ? candidate.scannedBytes : 0, speed: 0,
         issues: Array.isArray(candidate.issues) ? candidate.issues : [], error: interrupted ? "Flow Files closed before this task completed." : typeof candidate.error === "string" ? candidate.error.slice(0, 1000) : null,
+        recoveredFromRestart: interrupted || candidate.recoveredFromRestart === true,
       }];
     }).slice(-20);
   } catch {
