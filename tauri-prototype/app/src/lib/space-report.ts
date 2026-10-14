@@ -1,22 +1,6 @@
 import type { SpaceScanResult, UiLanguage } from "../types";
 import { formatSize } from "./format";
-
-const CATEGORY_LABELS: Record<string, [string, string]> = {
-  temporaryFiles: ["临时文件", "Temporary files"],
-  browserCache: ["浏览器缓存", "Browser caches"],
-  recycleBin: ["回收站", "Recycle Bin"],
-  aiModels: ["本地 AI 模型", "Local AI models"],
-  developerCaches: ["开发工具缓存", "Developer caches"],
-  downloads: ["下载目录", "Downloads"],
-  installersArchives: ["安装包与压缩文件", "Installers and archives"],
-  windowsUpdateCache: ["Windows 更新缓存", "Windows Update cache"],
-  systemManaged: ["系统管理文件", "System-managed files"],
-};
-
-function categoryLabel(id: string, language: UiLanguage) {
-  const pair = CATEGORY_LABELS[id];
-  return pair ? pair[language === "zh-CN" ? 0 : 1] : id;
-}
+import { spaceCategoryLabel } from "./space-utils";
 
 export function buildSpaceReport(result: SpaceScanResult, language: UiLanguage, capturedAt = Date.now()) {
   const zh = language === "zh-CN";
@@ -34,7 +18,7 @@ export function buildSpaceReport(result: SpaceScanResult, language: UiLanguage, 
   if (result.cancelled) lines.push(zh ? "注意：扫描提前停止，以下为部分结果。" : "Note: the scan stopped early, so the results are partial.");
   lines.push("", zh ? "分类占用" : "Categories");
   for (const category of [...result.categories].sort((left, right) => right.size - left.size)) {
-    lines.push(`- ${categoryLabel(category.id, language)}: ${formatSize(category.size)} · ${category.fileCount.toLocaleString(language)} ${zh ? "个文件" : "files"} · ${category.risk}`);
+    lines.push(`- ${spaceCategoryLabel(category.id, language)}: ${formatSize(category.size)} · ${category.fileCount.toLocaleString(language)} ${zh ? "个文件" : "files"} · ${category.risk}`);
   }
 
   lines.push("", zh ? "最大目录（前 10）" : "Largest folders (top 10)");
