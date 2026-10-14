@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { TransferTask } from "../types";
-import { filterOperationTasks } from "./task-utils";
+import { filterOperationTasks, prioritizeQueuedTask } from "./task-utils";
 
 function task(status: TransferTask["status"], recoveredFromRestart = false, issueCount = 0): TransferTask {
   return {
@@ -22,5 +22,13 @@ describe("task center filters", () => {
 
   it("keeps failed, recovered, and partially completed issue tasks together", () => {
     expect(filterOperationTasks(tasks, "issues")).toHaveLength(3);
+  });
+
+  it("moves a queued task ahead of other queued work without crossing the running task", () => {
+    const running = task("running");
+    const first = { ...task("queued"), jobId: "first" };
+    const second = { ...task("queued"), jobId: "second" };
+    expect(prioritizeQueuedTask([running, first, second], "second").map((item) => item.jobId)).toEqual([running.jobId, "second", "first"]);
+    expect(prioritizeQueuedTask([running, first], running.jobId)).toEqual([running, first]);
   });
 });

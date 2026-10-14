@@ -12,3 +12,14 @@ export function taskMatchesFilter(task: TransferTask, filter: TaskFilter) {
 export function filterOperationTasks(tasks: TransferTask[], filter: TaskFilter) {
   return tasks.filter((task) => taskMatchesFilter(task, filter));
 }
+
+export function prioritizeQueuedTask(tasks: TransferTask[], jobId: string) {
+  const taskIndex = tasks.findIndex((task) => task.jobId === jobId && task.status === "queued");
+  if (taskIndex < 0) return tasks;
+  const firstQueuedIndex = tasks.findIndex((task) => task.status === "queued");
+  if (firstQueuedIndex < 0 || taskIndex === firstQueuedIndex) return tasks;
+  const next = [...tasks];
+  const [task] = next.splice(taskIndex, 1);
+  next.splice(firstQueuedIndex, 0, task);
+  return next;
+}
