@@ -49,6 +49,7 @@ import { PreviewContent } from "./components/PreviewContent";
 import { TaskCenter } from "./components/TaskCenter";
 import { ConflictDialog, DeleteConfirmationDialog, OperationIssuesDialog } from "./components/OperationDialogs";
 import { StatusBar } from "./components/StatusBar";
+import { SettingsDialog } from "./components/SettingsDialog";
 import { UI_COPY } from "./localization";
 import { useAppUpdater } from "./hooks/useAppUpdater";
 import { prioritizeQueuedTask, retryableTaskPaths, type TaskFilter } from "./lib/task-utils";
@@ -992,13 +993,6 @@ function App() {
     } finally {
       setClaudeDiagnosticBusy(false);
     }
-  }
-
-  function claudeDiagnosticLabel(diagnostic: ClaudeDiagnostic) {
-    if (language === "en") {
-      return ({ ready: "Claude Code and the selected API are ready.", claudeMissing: "Claude Code was not found on this computer.", missingKey: "No DeepSeek API credential was found.", networkError: "The API endpoint could not be reached.", authError: "The API rejected this credential.", serviceError: "The API returned a service error.", notAuthenticated: "Claude Code is not signed in to Anthropic." } as Record<ClaudeDiagnostic["status"], string>)[diagnostic.status];
-    }
-    return ({ ready: "Claude Code 与所选 API 均可正常使用。", claudeMissing: "这台电脑上没有找到 Claude Code。", missingKey: "没有找到 DeepSeek API 凭据。", networkError: "无法连接 API 地址，请检查网络或代理。", authError: "API 拒绝了当前密钥，请检查密钥是否有效。", serviceError: "API 服务返回异常状态。", notAuthenticated: "Claude Code 尚未登录 Anthropic。" } as Record<ClaudeDiagnostic["status"], string>)[diagnostic.status];
   }
 
   function clearDeepSearch() {
@@ -3185,36 +3179,49 @@ function App() {
     {batchRenameOpen && <div className="settings-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !archiveBusy) setBatchRenameOpen(false); }}><section className="settings-panel batch-rename-panel" role="dialog" aria-modal="true" aria-labelledby="batch-rename-title"><header><div><h2 id="batch-rename-title">{text.batchRenameTitle}</h2><p>{text.batchRenameIntro}</p></div><button className="settings-close" disabled={archiveBusy} aria-label={text.cancel} onClick={() => setBatchRenameOpen(false)}>×</button></header><div className="batch-rename-fields"><label><span>{text.findText}</span><input autoFocus value={batchRenameDraft.find} onChange={(event) => setBatchRenameDraft((draft) => ({ ...draft, find: event.target.value }))} /></label><label><span>{text.replaceWith}</span><input value={batchRenameDraft.replace} onChange={(event) => setBatchRenameDraft((draft) => ({ ...draft, replace: event.target.value }))} /></label><label><span>{text.prefix}</span><input value={batchRenameDraft.prefix} onChange={(event) => setBatchRenameDraft((draft) => ({ ...draft, prefix: event.target.value }))} /></label><label><span>{text.suffix}</span><input value={batchRenameDraft.suffix} onChange={(event) => setBatchRenameDraft((draft) => ({ ...draft, suffix: event.target.value }))} /></label><label className="numbering-field"><span>{text.addNumbers}</span><button className={`switch ${batchRenameDraft.addNumbers ? "on" : ""}`} role="switch" aria-checked={batchRenameDraft.addNumbers} onClick={() => setBatchRenameDraft((draft) => ({ ...draft, addNumbers: !draft.addNumbers }))}><span /></button></label><label><span>{text.startAt}</span><input type="number" min="0" max="999999" disabled={!batchRenameDraft.addNumbers} value={batchRenameDraft.startNumber} onChange={(event) => setBatchRenameDraft((draft) => ({ ...draft, startNumber: Math.max(0, Number(event.target.value) || 0) }))} /></label></div><div className="batch-preview"><strong>{text.previewChanges}</strong>{batchRenamePreview.slice(0, 12).map(({ entry, name }) => <div key={entry.path}><span title={entry.name}>{entry.name}</span><b>→</b><span title={name}>{name}</span></div>)}{batchRenamePreview.length > 12 && <small>{language === "zh-CN" ? `另有 ${batchRenamePreview.length - 12} 个项目` : `${batchRenamePreview.length - 12} more item(s)`}</small>}</div>{batchRenameError && <div className="batch-rename-error">{batchRenameError}</div>}<div className="conflict-actions"><button disabled={archiveBusy} onClick={() => setBatchRenameOpen(false)}>{text.cancel}</button><button className="primary" disabled={archiveBusy} onClick={() => void applyBatchRename()}>{archiveBusy ? text.loading : text.applyRename}</button></div></section></div>}
     {spaceHealthOpen && renderSpaceHealth()}
     {quickPreviewOpen && selected && selectedPaths.size === 1 && <div className="quick-preview-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setQuickPreviewOpen(false); }}><section className="quick-preview" role="dialog" aria-modal="true" aria-label={text.preview}><button className="quick-preview-close" aria-label={text.close} onClick={() => setQuickPreviewOpen(false)}>×</button><PreviewContent entry={selected} preview={preview} loading={previewLoading} language={language} copy={text} onOpen={() => { setQuickPreviewOpen(false); void openEntry(selected); }} onTextPage={(encoding, offset) => void loadTextPreviewPage(encoding, offset)} /></section></div>}
-    {settingsOpen && <div className="settings-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setSettingsOpen(false); }}>
-      <section className="settings-panel" role="dialog" aria-modal="true" aria-labelledby="settings-title">
-        <header><div><h2 id="settings-title">{text.settingsTitle}</h2><p>{text.settingsIntro}</p></div><button className="settings-close" aria-label={text.close} onClick={() => setSettingsOpen(false)}>×</button></header>
-        <div className="settings-body">
-          <div className="setting-row"><div><strong>{text.interfaceLanguage}</strong></div><div className="segmented"><button className={language === "zh-CN" ? "active" : ""} onClick={() => chooseLanguage("zh-CN")}>{text.chinese}</button><button className={language === "en" ? "active" : ""} onClick={() => chooseLanguage("en")}>{text.english}</button></div></div>
-          <div className="setting-row"><div><strong>{text.fileExtensions}</strong><p>{text.extensionsHint}</p></div><button className={`switch ${showExtensions ? "on" : ""}`} role="switch" aria-checked={showExtensions} onClick={toggleExtensions}><span /></button></div>
-          <div className="setting-row"><div><strong>{text.hiddenItems}</strong><p>{text.hiddenHint}</p></div><button className={`switch ${showHidden ? "on" : ""}`} role="switch" aria-checked={showHidden} onClick={toggleHidden}><span /></button></div>
-          <div className="setting-row update-setting-row"><div><strong>{language === "zh-CN" ? "应用更新" : "Application updates"}</strong><p>{appUpdate ? (language === "zh-CN" ? `发现 Flow Files ${appUpdate.version}，当前版本 ${appUpdate.currentVersion}。安装前会验证发布签名。` : `Flow Files ${appUpdate.version} is available; current version ${appUpdate.currentVersion}. The release signature is verified before installation.`) : appUpdateChecked ? (language === "zh-CN" ? "当前已是最新公开版本。" : "You are running the latest published version.") : (language === "zh-CN" ? "从 GitHub 正式发布通道检查经过签名的更新，不会安装未签名文件。" : "Checks the official GitHub release channel for signed updates. Unsigned files are never installed.")}</p>{appUpdate?.body && <small>{appUpdate.body}</small>}{appUpdateError && <small className="integration-error">{appUpdateError}</small>}{appUpdateProgress !== null && <div className="update-progress"><i style={{ width: `${appUpdateProgress}%` }} /></div>}</div><div className="update-setting-actions">{appUpdate && <button className="primary" disabled={appUpdateBusy} onClick={() => void installAvailableUpdate()}>{appUpdateBusy ? (language === "zh-CN" ? "正在安装…" : "Installing…") : (language === "zh-CN" ? "下载并安装" : "Download and install")}</button>}<button className="secondary" disabled={appUpdateBusy} onClick={() => void checkForUpdates()}>{appUpdateBusy && !appUpdate ? (language === "zh-CN" ? "正在检查…" : "Checking…") : (language === "zh-CN" ? "检查更新" : "Check for updates")}</button></div></div>
-          <div className="setting-row folder-integration-row everything-setting-row"><div><strong>{language === "zh-CN" ? "Everything 秒级搜索" : "Everything instant search"}</strong><p>{language === "zh-CN" ? "优先使用本机 Everything 索引搜索子文件夹；不可用或筛选条件不适合时自动回退到 Flow Files 本地扫描。" : "Prefer the local Everything index for subfolder searches, with automatic fallback to Flow Files' native scan."}</p><small className={everythingStatus?.running && everythingStatus.databaseLoaded ? "integration-enabled" : ""}>{everythingStatusBusy ? (language === "zh-CN" ? "正在读取状态…" : "Checking status…") : everythingStatusError ? `${language === "zh-CN" ? "状态读取失败" : "Status unavailable"}: ${everythingStatusError}` : everythingStatus?.running && everythingStatus.databaseLoaded ? `${language === "zh-CN" ? "索引就绪" : "Index ready"}${everythingStatus.version ? ` · v${everythingStatus.version}` : ""}${everythingStatus.indexedDrives.length ? ` · ${everythingStatus.indexedDrives.join(" ")}` : ""}` : everythingStatus?.installed ? (language === "zh-CN" ? "已安装；首次搜索时会自动启动索引客户端" : "Installed; the index client starts on first search") : (language === "zh-CN" ? "未检测到 Everything；搜索会使用本地扫描" : "Everything not found; searches use the native scanner")}</small></div><button className={`switch ${preferEverything ? "on" : ""}`} role="switch" aria-checked={preferEverything} onClick={toggleEverythingSearch}><span /></button></div>
-          <div className="setting-row folder-integration-row"><div><strong>{text.windowsFolderIntegration}</strong><p>{text.windowsFolderIntegrationHint}</p><small className={folderIntegration?.enabled ? "integration-enabled" : ""}>{folderIntegration?.enabled ? text.windowsFolderIntegrationEnabled : text.windowsFolderIntegrationDisabled}</small>{folderIntegrationError && <small className="integration-error">{folderIntegrationError}</small>}</div><button className={`switch ${folderIntegration?.enabled ? "on" : ""}`} role="switch" aria-checked={!!folderIntegration?.enabled} disabled={folderIntegrationBusy} onClick={() => void toggleFolderIntegration()}><span /></button></div>
-          <div className="setting-row folder-integration-row context-menu-row"><div><strong>{text.explorerContextMenu}</strong><p>{text.explorerContextMenuHint}</p><small className={folderContextMenu?.enabled ? "integration-enabled" : ""}>{folderContextMenu?.enabled ? text.explorerContextMenuEnabled : text.explorerContextMenuDisabled}</small>{folderContextMenuError && <small className="integration-error">{folderContextMenuError}</small>}</div><button className={`switch ${folderContextMenu?.enabled ? "on" : ""}`} role="switch" aria-checked={!!folderContextMenu?.enabled} disabled={folderContextMenuBusy} onClick={() => void toggleFolderContextMenu()}><span /></button></div>
-          <div className="setting-row claude-provider-row"><div><strong>{text.claudeProvider}</strong></div><div className="segmented"><button className={claudeProvider === "anthropic" ? "active" : ""} onClick={() => chooseClaudeProvider("anthropic")}>{text.officialAnthropic}</button><button className={claudeProvider === "deepseek" ? "active" : ""} onClick={() => chooseClaudeProvider("deepseek")}>{text.deepseek}</button></div></div>
-          <div className="setting-row claude-access-row"><div><strong>{text.claudeFullAccess}</strong><p>{text.claudeFullAccessHint}</p></div><button className={`switch ${claudeFullAccess ? "on" : ""}`} role="switch" aria-checked={claudeFullAccess} onClick={toggleClaudeFullAccess}><span /></button></div>
-          {claudeProvider === "deepseek" && <div className="claude-key-setting">
-            <div className="claude-key-heading"><div><strong>{text.deepseekApiKey}</strong><p>{text.deepseekKeyHint}</p></div><span className={`credential-state ${(claudeCredential?.stored || claudeCredential?.environmentAvailable) ? "ready" : "missing"}`}>{claudeCredential?.stored ? text.keySaved : claudeCredential?.environmentAvailable ? text.keyFromEnvironment : text.keyMissing}</span></div>
-            <div className="claude-key-controls"><input type="password" autoComplete="off" spellCheck={false} value={claudeApiKeyDraft} onChange={(event) => setClaudeApiKeyDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void saveClaudeApiKey(); }} placeholder={claudeCredential?.stored ? "••••••••••••••••" : text.enterApiKey} /><button className="primary" disabled={claudeCredentialBusy || !claudeApiKeyDraft.trim()} onClick={() => void saveClaudeApiKey()}>{claudeCredential?.stored ? text.replaceKey : text.saveKey}</button>{claudeCredential?.stored && <button className="secondary" disabled={claudeCredentialBusy} onClick={() => void removeClaudeApiKey()}>{text.removeKey}</button>}</div>
-            {claudeCredentialError && <p className="claude-key-error">{claudeCredentialError}</p>}
-          </div>}
-          <div className="claude-diagnostic-setting">
-            <div className="claude-diagnostic-heading"><div><strong>{text.claudeDiagnostics}</strong><p>{language === "zh-CN" ? "检查 Claude 命令、版本、凭据与 API 连通性。密钥不会显示或写入日志。" : "Check the Claude command, version, credential, and API connectivity. The key is never displayed or logged."}</p></div><button disabled={claudeDiagnosticBusy} onClick={() => void runClaudeDiagnostic()}>{claudeDiagnosticBusy ? text.testingConnection : text.testConnection}</button></div>
-            {claudeDiagnostic && <div className={`claude-diagnostic-result ${claudeDiagnostic.status === "ready" ? "ready" : "problem"}`}>
-              <div className="diagnostic-status"><strong>{claudeDiagnostic.status === "ready" ? text.diagnosticReady : text.diagnosticMissing}</strong><span>{claudeDiagnosticLabel(claudeDiagnostic)}</span></div>
-              <dl><div><dt>{text.diagnosticVersion}</dt><dd>{claudeDiagnostic.claudeFound ? claudeDiagnostic.version ?? text.credentialAvailable : text.credentialUnavailable}</dd></div><div><dt>{text.diagnosticEndpoint}</dt><dd title={claudeDiagnostic.endpoint}>{claudeDiagnostic.endpoint || "—"}</dd></div><div><dt>{text.diagnosticCredential}</dt><dd>{claudeDiagnostic.keyAvailable ? text.credentialAvailable : text.credentialUnavailable}</dd></div>{claudeDiagnostic.balanceAvailable !== null && <div><dt>{text.diagnosticBalance}</dt><dd>{claudeDiagnostic.balanceAvailable ? (language === "zh-CN" ? "是" : "Yes") : (language === "zh-CN" ? "否" : "No")}</dd></div>}</dl>
-              {claudeDiagnostic.status !== "ready" && claudeDiagnostic.message && <small>{claudeDiagnostic.message}</small>}
-            </div>}
-          </div>
-        </div>
-        <div className="settings-footer"><button onClick={() => setSettingsOpen(false)}>{text.close}</button></div>
-      </section>
-    </div>}
+    {settingsOpen && <SettingsDialog
+      language={language}
+      showExtensions={showExtensions}
+      showHidden={showHidden}
+      appUpdate={appUpdate}
+      appUpdateChecked={appUpdateChecked}
+      appUpdateBusy={appUpdateBusy}
+      appUpdateProgress={appUpdateProgress}
+      appUpdateError={appUpdateError}
+      preferEverything={preferEverything}
+      everythingStatus={everythingStatus}
+      everythingStatusBusy={everythingStatusBusy}
+      everythingStatusError={everythingStatusError}
+      folderIntegration={folderIntegration}
+      folderIntegrationBusy={folderIntegrationBusy}
+      folderIntegrationError={folderIntegrationError}
+      folderContextMenu={folderContextMenu}
+      folderContextMenuBusy={folderContextMenuBusy}
+      folderContextMenuError={folderContextMenuError}
+      claudeProvider={claudeProvider}
+      claudeFullAccess={claudeFullAccess}
+      claudeCredential={claudeCredential}
+      claudeApiKeyDraft={claudeApiKeyDraft}
+      claudeCredentialBusy={claudeCredentialBusy}
+      claudeCredentialError={claudeCredentialError}
+      claudeDiagnostic={claudeDiagnostic}
+      claudeDiagnosticBusy={claudeDiagnosticBusy}
+      onClose={() => setSettingsOpen(false)}
+      onLanguageChange={chooseLanguage}
+      onToggleExtensions={toggleExtensions}
+      onToggleHidden={toggleHidden}
+      onCheckForUpdates={() => void checkForUpdates()}
+      onInstallUpdate={() => void installAvailableUpdate()}
+      onToggleEverything={toggleEverythingSearch}
+      onToggleFolderIntegration={() => void toggleFolderIntegration()}
+      onToggleFolderContextMenu={() => void toggleFolderContextMenu()}
+      onClaudeProviderChange={chooseClaudeProvider}
+      onToggleClaudeFullAccess={toggleClaudeFullAccess}
+      onClaudeApiKeyDraftChange={setClaudeApiKeyDraft}
+      onSaveClaudeApiKey={() => void saveClaudeApiKey()}
+      onRemoveClaudeApiKey={() => void removeClaudeApiKey()}
+      onRunClaudeDiagnostic={() => void runClaudeDiagnostic()}
+    />}
     {contextMenu?.kind === "entry" && <div className="context-menu" style={{ left: contextMenu.x, top: contextMenu.y }} onPointerDown={(event) => event.stopPropagation()}>
       <button disabled={!selected || selectedPaths.size !== 1} onClick={() => { setContextMenu(null); if (selected) void openEntry(selected); }}><span>{text.open}</span><kbd>Enter</kbd></button>
       <button disabled={!selected || selectedPaths.size !== 1 || selected.isDirectory} onClick={() => { setContextMenu(null); void openWithSelected(); }}><span>{text.openWith}</span></button>
