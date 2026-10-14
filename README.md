@@ -76,6 +76,8 @@ npm run build:app
 npm run build:installer
 ```
 
+推送与四处构建清单一致的 `vMAJOR.MINOR.PATCH` 标签后，GitHub Actions 会运行前后端测试、生成 Windows NSIS 安装包，并创建一个待人工验收的草稿 Release。草稿不会自动公开；应先验证全新安装、覆盖升级、保留设置和卸载，再发布。
+
 ## 数据与安全
 
 - 文件删除默认进入 Windows 回收站；永久删除必须经过确认。
@@ -101,6 +103,8 @@ npm run build:installer
 - `CHANGELOG.md`
 
 可以运行 `tools/Check-Version.ps1` 检查各构建清单中的版本是否一致；GitHub CI 也会执行同一检查。
+
+发布标签还会与清单版本进行强校验，例如 `v0.2.0` 只能发布清单版本 `0.2.0`。当前自动发布只生成安装包；应用内更新需要专用签名密钥，未配置密钥前不会以不安全方式绕过校验。
 
 ## 技术对照记录
 

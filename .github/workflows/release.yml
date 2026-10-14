@@ -1,0 +1,68 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  windows-installer:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: tauri-prototype/app/package-lock.json
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build artifacts
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: tauri-prototype/app/src-tauri
+
+      - name: Install frontend dependencies
+        working-directory: tauri-prototype/app
+        run: npm ci
+
+      - name: Check release version
+        shell: pwsh
+        run: |
+          $expected = if ("${{ github.ref_type }}" -eq "tag") { "${{ github.ref_name }}".TrimStart('v') } else { $null }
+          ./tools/Check-Version.ps1 -ExpectedVersion $expected
+
+      - name: Test frontend logic
+        working-directory: tauri-prototype/app
+        run: npm test
+
+      - name: Test Rust backend
+        working-directory: tauri-prototype/app
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Build NSIS installer and draft release
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: tauri-prototype/app
+          tagName: v__VERSION__
+          releaseName: Flow Files v__VERSION__
+          releaseBody: Download the Windows setup executable below. This release remains a draft until its installer has been verified.
+          releaseDraft: true
+          prerelease: false
+          args: --bundles nsis

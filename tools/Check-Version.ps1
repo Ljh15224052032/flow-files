@@ -1,5 +1,7 @@
 [CmdletBinding()]
-param()
+param(
+    [string]$ExpectedVersion
+)
 
 $ErrorActionPreference = 'Stop'
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
@@ -40,6 +42,10 @@ $uniqueVersions = @($versions.Values | Sort-Object -Unique)
 if ($uniqueVersions.Count -ne 1) {
     $details = ($versions.GetEnumerator() | ForEach-Object { "{0}={1}" -f $_.Key, $_.Value }) -join ', '
     throw "Flow Files version mismatch: $details"
+}
+
+if ($ExpectedVersion -and $uniqueVersions[0] -ne $ExpectedVersion) {
+    throw "Flow Files version $($uniqueVersions[0]) does not match the release version $ExpectedVersion."
 }
 
 Write-Output "Flow Files version $($uniqueVersions[0]) is consistent across all manifests."

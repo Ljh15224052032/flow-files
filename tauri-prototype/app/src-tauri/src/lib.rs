@@ -5720,6 +5720,19 @@ mod tests {
     }
 
     #[test]
+    fn release_bundle_keeps_a_stable_windows_identity() {
+        let config: Value = serde_json::from_str(include_str!("../tauri.conf.json"))
+            .expect("parse bundled Tauri configuration");
+        assert_eq!(config["productName"], "Flow Files");
+        assert_eq!(config["identifier"], "com.coderebuild.filemanagerlab");
+        assert_eq!(config["bundle"]["targets"][0], "nsis");
+        assert_eq!(
+            config["bundle"]["windows"]["nsis"]["installMode"],
+            "currentUser"
+        );
+    }
+
+    #[test]
     fn rejects_unsafe_windows_leaf_names() {
         for name in [
             "",
