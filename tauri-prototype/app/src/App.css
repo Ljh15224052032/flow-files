@@ -790,13 +790,19 @@ footer { position: relative; z-index: 2; display: flex; min-width: 0; min-height
 .progress-track i { position: absolute; inset: 0 auto 0 0; border-radius: inherit; background: #c9c9c9; transition: width .12s linear; }
 .progress-track.indeterminate i, .task-progress.indeterminate i { animation: scan-progress 1.15s ease-in-out infinite; }
 @keyframes scan-progress { from { transform: translateX(-110%); } to { transform: translateX(310%); } }
-.task-center { position: fixed; z-index: 170; right: 16px; bottom: 50px; display: grid; width: min(430px, calc(100vw - 32px)); max-height: min(620px, calc(100vh - 86px)); grid-template-rows: auto minmax(0, 1fr) auto; overflow: hidden; border: 1px solid var(--border-strong); border-radius: 13px; background: #202020; box-shadow: 0 20px 64px #000c; }
+.task-center { position: fixed; z-index: 170; right: 16px; bottom: 50px; display: grid; width: min(430px, calc(100vw - 32px)); max-height: min(620px, calc(100vh - 86px)); grid-template-rows: auto auto minmax(0, 1fr) auto; overflow: hidden; border: 1px solid var(--border-strong); border-radius: 13px; background: #202020; box-shadow: 0 20px 64px #000c; }
 .task-center > header { display: flex; align-items: center; justify-content: space-between; padding: 15px 16px 13px; border-bottom: 1px solid var(--border); }
 .task-center > header div { display: grid; gap: 3px; }
 .task-center > header strong { color: var(--text-strong); font-size: 14px; }
 .task-center > header span { color: var(--muted); font-size: 11px; }
 .task-center > header button { width: 28px; height: 28px; border: 0; border-radius: 7px; background: transparent; color: var(--muted-strong); font-size: 19px; }
 .task-center > header button:hover { background: var(--hover); color: var(--text-strong); }
+.task-filters { display: flex; gap: 5px; overflow-x: auto; border-bottom: 1px solid var(--border); padding: 8px 10px; }
+.task-filters button { display: flex; min-height: 28px; align-items: center; gap: 6px; border: 1px solid transparent; border-radius: 7px; background: transparent; padding: 0 8px; color: var(--muted-strong); font-size: 10px; white-space: nowrap; }
+.task-filters button:hover { background: var(--hover); color: var(--text); }
+.task-filters button.active { border-color: var(--border-strong); background: var(--selected); color: #eee; }
+.task-filters button b { color: #888; font-size: 9px; font-weight: 550; }
+.task-filters button.active b { color: #bbb; }
 .task-list { display: grid; align-content: start; gap: 8px; overflow: auto; padding: 10px; }
 .task-empty { padding: 34px 10px; color: var(--muted); text-align: center; }
 .task-item { display: grid; gap: 8px; border: 1px solid var(--border); border-radius: 9px; background: #1b1b1b; padding: 11px 12px; }
