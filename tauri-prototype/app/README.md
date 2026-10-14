@@ -30,4 +30,4 @@ src-tauri/target/release/flow-files.exe
 
 `app/.cargo/config.toml` 是当前电脑使用的 Cargo 镜像配置，只保留在本机，不进入 Git；GitHub CI 使用官方 crates.io。
 
-`src/App.tsx` 负责页面状态和功能编排；可独立验证的路径、排序、持久化和格式化逻辑位于 `src/lib`，预览与图标位于 `src/components`，中英文案位于 `src/localization.ts`。Rust 生产命令位于 `src-tauri/src/lib.rs`，测试集中在相邻的 `tests.rs`。新增功能应优先放进对应领域模块，避免再次把所有实现堆回主文件。
+`src/App.tsx` 负责页面状态和功能编排；可独立验证的路径、排序、持久化和格式化逻辑位于 `src/lib`，预览与图标位于 `src/components`，带生命周期的功能状态位于 `src/hooks`，中英文案位于 `src/localization.ts`。Rust 生产命令位于 `src-tauri/src/lib.rs`，测试集中在相邻的 `tests.rs`。新增功能应优先放进对应领域模块，避免再次把所有实现堆回主文件。
