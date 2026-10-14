@@ -54,22 +54,7 @@ import { useAppUpdater } from "./hooks/useAppUpdater";
 import { prioritizeQueuedTask, retryableTaskPaths, type TaskFilter } from "./lib/task-utils";
 import { buildSpaceReport } from "./lib/space-report";
 import { duplicateFileMatchesType, duplicateKeepReason, spaceCategoryAdvice, spaceCategoryLabel, suggestedDuplicateKeep } from "./lib/space-utils";
-
-
-function unavailableLocationCopy(status: DirectoryStatus, language: UiLanguage) {
-  if (language === "zh-CN") {
-    if (status.reason === "accessDenied") return { title: "位置存在，但当前账号无权访问", detail: "请检查共享凭据或文件夹权限；Flow Files 每 8 秒自动重试。" };
-    if (status.reason === "notFound") return { title: "位置已移动或设备已断开", detail: "重新连接磁盘或确认路径后，Flow Files 会自动恢复。" };
-    if (status.reason === "unreachable") return { title: status.kind === "network" ? "网络位置暂时不可达" : "驱动器暂时不可达", detail: "请检查设备、网络或 VPN；Flow Files 每 8 秒自动重试。" };
-    if (status.reason === "timeout") return { title: "位置响应超时", detail: "检测已转入后台并延长重试间隔，不会持续阻塞文件浏览。" };
-    return { title: status.kind === "network" ? "网络位置不可用" : "驱动器或文件夹已断开", detail: "当前内容会保留；Flow Files 每 8 秒自动重试。" };
-  }
-  if (status.reason === "accessDenied") return { title: "The location exists, but access was denied", detail: "Check the share credentials or folder permissions. Flow Files retries every 8 seconds." };
-  if (status.reason === "notFound") return { title: "The location moved or the device disconnected", detail: "Reconnect the drive or verify the path; Flow Files will recover automatically." };
-  if (status.reason === "unreachable") return { title: status.kind === "network" ? "Network location is unreachable" : "Drive is unreachable", detail: "Check the device, network, or VPN. Flow Files retries every 8 seconds." };
-  if (status.reason === "timeout") return { title: "Location check timed out", detail: "The check continues in the background with a longer retry interval, without blocking file browsing." };
-  return { title: status.kind === "network" ? "Network location unavailable" : "Drive or folder disconnected", detail: "The current view is preserved. Flow Files retries every 8 seconds." };
-}
+import { nextAvailabilityRetry, unavailableLocationCopy } from "./lib/network-utils";
 
 function readStoredSortKey(): SortKey {
   const stored = localStorage.getItem(SORT_KEY);
@@ -371,9 +356,7 @@ function App() {
       return;
     }
     const previous = availabilityRetryRef.current.get(key)?.failures ?? 0;
-    const failures = Math.min(previous + 1, 5);
-    const delay = Math.min(120_000, 8_000 * (2 ** Math.max(0, failures - 1)));
-    availabilityRetryRef.current.set(key, { failures, nextAt: Date.now() + delay });
+    availabilityRetryRef.current.set(key, nextAvailabilityRetry(previous));
   }
 
   useEffect(() => {
