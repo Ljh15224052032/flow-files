@@ -22,6 +22,8 @@ Flow Files 是一款面向 Windows 的轻量文件管理器，使用 Tauri 2、R
 
 更完整的状态划分见 [ROADMAP.md](ROADMAP.md)，每个版本的变化见 [CHANGELOG.md](CHANGELOG.md)。
 
+准备发布时先运行 `tools/Test-ReleaseReadiness.ps1`，再按 [发布验收矩阵](docs/RELEASE_ACCEPTANCE.md) 完成安装、升级、验签更新与卸载测试。实际安装步骤必须由测试者明确确认后执行。
+
 ## 目录结构
 
 ```text
