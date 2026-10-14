@@ -5608,6 +5608,7 @@ pub fn run() {
                 let _ = window.set_focus();
             }
         }));
+        builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
     }
     builder
         .manage(OperationJobs::default())
@@ -5729,6 +5730,21 @@ mod tests {
         assert_eq!(
             config["bundle"]["windows"]["nsis"]["installMode"],
             "currentUser"
+        );
+        assert_eq!(config["bundle"]["createUpdaterArtifacts"], true);
+        assert_eq!(
+            config["plugins"]["updater"]["endpoints"][0],
+            "https://github.com/Ljh15224052032/flow-files/releases/latest/download/latest.json"
+        );
+        assert!(
+            config["plugins"]["updater"]["pubkey"]
+                .as_str()
+                .is_some_and(|key| key.len() > 80),
+            "the updater public key must remain configured"
+        );
+        assert_eq!(
+            config["plugins"]["updater"]["windows"]["installMode"],
+            "passive"
         );
     }
 

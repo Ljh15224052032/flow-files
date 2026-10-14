@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, 
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { check as checkForAppUpdate } from "@tauri-apps/plugin-updater";
 import brandIcon from "../src-tauri/icons/flow-files.svg";
 import "./App.css";
 import {
@@ -45,6 +46,8 @@ import {
 } from "./components/Icons";
 import { formatDate, formatDuration, formatSize } from "./lib/format";
 import { PreviewContent } from "./components/PreviewContent";
+
+type AppUpdateInfo = { version: string; currentVersion: string; body: string | null; date: string | null };
 
 const UI_COPY = {
   "zh-CN": {
@@ -269,6 +272,11 @@ function App() {
   const [actionsMenuStyle, setActionsMenuStyle] = useState<React.CSSProperties>({});
   const [language, setLanguage] = useState<UiLanguage>(() => localStorage.getItem(LANGUAGE_KEY) === "en" ? "en" : "zh-CN");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [appUpdate, setAppUpdate] = useState<AppUpdateInfo | null>(null);
+  const [appUpdateChecked, setAppUpdateChecked] = useState(false);
+  const [appUpdateBusy, setAppUpdateBusy] = useState(false);
+  const [appUpdateProgress, setAppUpdateProgress] = useState<number | null>(null);
+  const [appUpdateError, setAppUpdateError] = useState<string | null>(null);
   const [folderIntegration, setFolderIntegration] = useState<FolderIntegrationStatus | null>(null);
   const [folderIntegrationBusy, setFolderIntegrationBusy] = useState(false);
   const [folderIntegrationError, setFolderIntegrationError] = useState<string | null>(null);
@@ -2226,6 +2234,49 @@ function App() {
     }
   }
 
+  async function checkForUpdates() {
+    setAppUpdateBusy(true);
+    setAppUpdateError(null);
+    setAppUpdateProgress(null);
+    try {
+      const update = await checkForAppUpdate({ timeout: 15_000 });
+      setAppUpdate(update ? { version: update.version, currentVersion: update.currentVersion, body: update.body ?? null, date: update.date ?? null } : null);
+      setAppUpdateChecked(true);
+      await update?.close();
+    } catch (error) {
+      setAppUpdateError(language === "zh-CN" ? `无法检查更新：${String(error)}` : `Could not check for updates: ${String(error)}`);
+    } finally {
+      setAppUpdateBusy(false);
+    }
+  }
+
+  async function installAvailableUpdate() {
+    setAppUpdateBusy(true);
+    setAppUpdateError(null);
+    setAppUpdateProgress(0);
+    try {
+      const update = await checkForAppUpdate({ timeout: 30_000 });
+      if (!update) {
+        setAppUpdate(null);
+        setAppUpdateChecked(true);
+        setAppUpdateProgress(null);
+        return;
+      }
+      let downloaded = 0;
+      let total = 0;
+      await update.downloadAndInstall((event) => {
+        if (event.event === "Started") total = event.data.contentLength ?? 0;
+        if (event.event === "Progress") downloaded += event.data.chunkLength;
+        setAppUpdateProgress(total > 0 ? Math.min(100, downloaded / total * 100) : null);
+      });
+    } catch (error) {
+      setAppUpdateError(language === "zh-CN" ? `更新安装失败：${String(error)}` : `Update installation failed: ${String(error)}`);
+      setAppUpdateProgress(null);
+    } finally {
+      setAppUpdateBusy(false);
+    }
+  }
+
   async function refreshDirectory(path: string) {
     try {
       const nextListing = await invoke<DirectoryListing>("list_directory", { path });
@@ -3252,6 +3303,7 @@ function App() {
           <div className="setting-row"><div><strong>{text.interfaceLanguage}</strong></div><div className="segmented"><button className={language === "zh-CN" ? "active" : ""} onClick={() => chooseLanguage("zh-CN")}>{text.chinese}</button><button className={language === "en" ? "active" : ""} onClick={() => chooseLanguage("en")}>{text.english}</button></div></div>
           <div className="setting-row"><div><strong>{text.fileExtensions}</strong><p>{text.extensionsHint}</p></div><button className={`switch ${showExtensions ? "on" : ""}`} role="switch" aria-checked={showExtensions} onClick={toggleExtensions}><span /></button></div>
           <div className="setting-row"><div><strong>{text.hiddenItems}</strong><p>{text.hiddenHint}</p></div><button className={`switch ${showHidden ? "on" : ""}`} role="switch" aria-checked={showHidden} onClick={toggleHidden}><span /></button></div>
+          <div className="setting-row update-setting-row"><div><strong>{language === "zh-CN" ? "应用更新" : "Application updates"}</strong><p>{appUpdate ? (language === "zh-CN" ? `发现 Flow Files ${appUpdate.version}，当前版本 ${appUpdate.currentVersion}。安装前会验证发布签名。` : `Flow Files ${appUpdate.version} is available; current version ${appUpdate.currentVersion}. The release signature is verified before installation.`) : appUpdateChecked ? (language === "zh-CN" ? "当前已是最新公开版本。" : "You are running the latest published version.") : (language === "zh-CN" ? "从 GitHub 正式发布通道检查经过签名的更新，不会安装未签名文件。" : "Checks the official GitHub release channel for signed updates. Unsigned files are never installed.")}</p>{appUpdate?.body && <small>{appUpdate.body}</small>}{appUpdateError && <small className="integration-error">{appUpdateError}</small>}{appUpdateProgress !== null && <div className="update-progress"><i style={{ width: `${appUpdateProgress}%` }} /></div>}</div><div className="update-setting-actions">{appUpdate && <button className="primary" disabled={appUpdateBusy} onClick={() => void installAvailableUpdate()}>{appUpdateBusy ? (language === "zh-CN" ? "正在安装…" : "Installing…") : (language === "zh-CN" ? "下载并安装" : "Download and install")}</button>}<button className="secondary" disabled={appUpdateBusy} onClick={() => void checkForUpdates()}>{appUpdateBusy && !appUpdate ? (language === "zh-CN" ? "正在检查…" : "Checking…") : (language === "zh-CN" ? "检查更新" : "Check for updates")}</button></div></div>
           <div className="setting-row folder-integration-row everything-setting-row"><div><strong>{language === "zh-CN" ? "Everything 秒级搜索" : "Everything instant search"}</strong><p>{language === "zh-CN" ? "优先使用本机 Everything 索引搜索子文件夹；不可用或筛选条件不适合时自动回退到 Flow Files 本地扫描。" : "Prefer the local Everything index for subfolder searches, with automatic fallback to Flow Files' native scan."}</p><small className={everythingStatus?.running && everythingStatus.databaseLoaded ? "integration-enabled" : ""}>{everythingStatusBusy ? (language === "zh-CN" ? "正在读取状态…" : "Checking status…") : everythingStatusError ? `${language === "zh-CN" ? "状态读取失败" : "Status unavailable"}: ${everythingStatusError}` : everythingStatus?.running && everythingStatus.databaseLoaded ? `${language === "zh-CN" ? "索引就绪" : "Index ready"}${everythingStatus.version ? ` · v${everythingStatus.version}` : ""}${everythingStatus.indexedDrives.length ? ` · ${everythingStatus.indexedDrives.join(" ")}` : ""}` : everythingStatus?.installed ? (language === "zh-CN" ? "已安装；首次搜索时会自动启动索引客户端" : "Installed; the index client starts on first search") : (language === "zh-CN" ? "未检测到 Everything；搜索会使用本地扫描" : "Everything not found; searches use the native scanner")}</small></div><button className={`switch ${preferEverything ? "on" : ""}`} role="switch" aria-checked={preferEverything} onClick={toggleEverythingSearch}><span /></button></div>
           <div className="setting-row folder-integration-row"><div><strong>{text.windowsFolderIntegration}</strong><p>{text.windowsFolderIntegrationHint}</p><small className={folderIntegration?.enabled ? "integration-enabled" : ""}>{folderIntegration?.enabled ? text.windowsFolderIntegrationEnabled : text.windowsFolderIntegrationDisabled}</small>{folderIntegrationError && <small className="integration-error">{folderIntegrationError}</small>}</div><button className={`switch ${folderIntegration?.enabled ? "on" : ""}`} role="switch" aria-checked={!!folderIntegration?.enabled} disabled={folderIntegrationBusy} onClick={() => void toggleFolderIntegration()}><span /></button></div>
           <div className="setting-row folder-integration-row context-menu-row"><div><strong>{text.explorerContextMenu}</strong><p>{text.explorerContextMenuHint}</p><small className={folderContextMenu?.enabled ? "integration-enabled" : ""}>{folderContextMenu?.enabled ? text.explorerContextMenuEnabled : text.explorerContextMenuDisabled}</small>{folderContextMenuError && <small className="integration-error">{folderContextMenuError}</small>}</div><button className={`switch ${folderContextMenu?.enabled ? "on" : ""}`} role="switch" aria-checked={!!folderContextMenu?.enabled} disabled={folderContextMenuBusy} onClick={() => void toggleFolderContextMenu()}><span /></button></div>

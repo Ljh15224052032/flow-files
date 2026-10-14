@@ -56,6 +56,7 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": ["nsis"],
     "icon": [
       "icons/32x32.png",
@@ -72,6 +73,17 @@
         "installerIcon": "icons/icon.ico",
         "uninstallerIcon": "icons/icon.ico",
         "startMenuFolder": "Flow Files"
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEVERDQ0ODA2OTlFNEUzODQKUldTRTQrU1pCa2pVN1JrSWl5L2tnQkp3clp5d3dGb3BHTXN6R2djUVA3YXdPUEN0ejBaRlIzZXoK",
+      "endpoints": [
+        "https://github.com/Ljh15224052032/flow-files/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
       }
     }
   }

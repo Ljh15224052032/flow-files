@@ -18,6 +18,7 @@ Flow Files 是一款面向 Windows 的轻量文件管理器，使用 Tauri 2、R
 - Windows Terminal 与 Claude Code 启动；DeepSeek 密钥存放在 Windows 凭据管理器。
 - 文件夹右键菜单和目录打开集成。项目不会宣称能够可靠劫持所有第三方软件对资源管理器的调用。
 - 中文和英文界面，以及接近 Codex 的中性深色视觉风格。
+- 设置页可检查并确认安装 GitHub 正式发布通道中的更新；下载内容必须通过内置公钥验签。
 
 更完整的状态划分见 [ROADMAP.md](ROADMAP.md)，每个版本的变化见 [CHANGELOG.md](CHANGELOG.md)。
 
@@ -104,7 +105,9 @@ npm run build:installer
 
 可以运行 `tools/Check-Version.ps1` 检查各构建清单中的版本是否一致；GitHub CI 也会执行同一检查。
 
-发布标签还会与清单版本进行强校验，例如 `v0.2.0` 只能发布清单版本 `0.2.0`。当前自动发布只生成安装包；应用内更新需要专用签名密钥，未配置密钥前不会以不安全方式绕过校验。
+发布标签还会与清单版本进行强校验，例如 `v0.2.0` 只能发布清单版本 `0.2.0`。发布流水线使用 GitHub Secrets 中的专用私钥签名更新包，应用只内置可公开的验证公钥；验签失败的更新不会安装。
+
+维护者本机的加密签名私钥位于 `%USERPROFILE%\.tauri\flow-files.key`，密码备份位于同目录的 `flow-files-signing-password.dpapi`，只能由当前 Windows 用户解密。这两个文件都不属于仓库；正式使用应用内更新后，丢失私钥将无法继续向既有安装推送更新，应另做安全的离线备份。
 
 ## 技术对照记录
 

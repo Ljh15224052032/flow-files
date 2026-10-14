@@ -627,6 +627,17 @@ button:disabled { cursor: default; opacity: .4; }
 .settings-body { min-height: 0; overflow: auto; }
 .setting-row { display: flex; min-height: 78px; align-items: center; justify-content: space-between; gap: 24px; padding: 16px 22px; border-bottom: 1px solid var(--border); }
 .setting-row strong { display: block; margin-bottom: 4px; font-size: 14px; }
+.update-setting-row { align-items: flex-start; }
+.update-setting-row > div:first-child { display: grid; min-width: 0; gap: 3px; }
+.update-setting-row p { max-width: 510px; margin: 0; color: #aaa; font-size: 11px; line-height: 1.5; }
+.update-setting-row small { max-width: 510px; overflow: hidden; color: #8d8d8d; font-size: 10px; line-height: 1.45; text-overflow: ellipsis; white-space: nowrap; }
+.update-setting-row small.integration-error { color: #e0aaa3; }
+.update-setting-actions { display: flex; flex: 0 0 auto; gap: 7px; }
+.update-setting-actions button { min-height: 31px; border: 1px solid var(--border-strong); border-radius: 7px; background: var(--surface); padding: 0 10px; color: var(--text); font-size: 11px; }
+.update-setting-actions button.primary { border-color: #d8d8d8; background: #d8d8d8; color: #1c1c1c; }
+.update-setting-actions button:disabled { opacity: .45; }
+.update-progress { width: min(100%, 460px); height: 3px; margin-top: 5px; overflow: hidden; border-radius: 99px; background: #333; }
+.update-progress i { display: block; height: 100%; border-radius: inherit; background: #aaa; }
 .segmented { display: flex; flex-shrink: 0; padding: 3px; border: 1px solid var(--border); border-radius: 9px; background: var(--bg); }
 .segmented button { border: 0; border-radius: 6px; background: transparent; padding: 7px 10px; color: var(--muted-strong); }
 .segmented button.active { background: var(--selected); color: #fff; }
