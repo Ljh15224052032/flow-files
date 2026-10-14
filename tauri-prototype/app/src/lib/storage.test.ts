@@ -3,8 +3,8 @@ import {
   OPERATION_TASKS_KEY, FAVORITES_KEY, SESSION_KEY, SPACE_SCAN_SNAPSHOTS_KEY,
 } from "../constants";
 import {
-  readSpaceScanSnapshots, readStoredFavorites, readStoredOperationTasks, readStoredSession,
-  snapshotForSpaceScan,
+  appendSpaceScanSnapshot, readSpaceScanHistory, readSpaceScanSnapshots, readStoredFavorites,
+  readStoredOperationTasks, readStoredSession, snapshotForSpaceScan,
 } from "./storage";
 
 class MemoryStorage implements Storage {
@@ -85,7 +85,7 @@ describe("persisted Flow Files state", () => {
     });
   });
 
-  it("stores only the compact disk trend snapshot", () => {
+  it("migrates a compact legacy disk snapshot into bounded history", () => {
     const snapshot = snapshotForSpaceScan({
       root: "C:\\",
       totalSpace: 1000,
@@ -106,5 +106,24 @@ describe("persisted Flow Files state", () => {
       availableSpace: 250,
       categories: { temporaryFiles: 40 },
     });
+    expect(readSpaceScanHistory().c).toEqual([snapshot]);
+  });
+
+  it("keeps only the latest twelve disk snapshots", () => {
+    let now = 1;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    for (let index = 0; index < 15; index += 1) {
+      now = index + 1;
+      appendSpaceScanSnapshot({
+        root: "C:\\", totalSpace: 1000, availableSpace: 300 - index,
+        scannedBytes: 600 + index, scannedFiles: 3, scannedFolders: 2, issues: 0,
+        skippedReparsePoints: 0, cancelled: false, largestFiles: [], largestDirectories: [],
+        categories: [{ id: "temporaryFiles", risk: "safe", size: index, fileCount: 1 }],
+      });
+    }
+    const history = readSpaceScanHistory()["c:\\"];
+    expect(history).toHaveLength(12);
+    expect(history[0].capturedAt).toBe(4);
+    expect(history[11].capturedAt).toBe(15);
   });
 });

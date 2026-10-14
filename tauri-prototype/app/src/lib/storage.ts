@@ -37,10 +37,28 @@ export function readCollapsedFavoriteGroups() {
 }
 
 export function readSpaceScanSnapshots(): Record<string, SpaceScanSnapshot> {
+  return Object.fromEntries(Object.entries(readSpaceScanHistory()).flatMap(([root, history]) => history.length ? [[root, history[history.length - 1]]] : []));
+}
+
+const MAX_SPACE_SCAN_SNAPSHOTS = 12;
+
+function parseSpaceScanSnapshot(value: unknown): SpaceScanSnapshot | null {
+  if (!value || typeof value !== "object") return null;
+  const candidate = value as Partial<SpaceScanSnapshot>;
+  if (typeof candidate.root !== "string" || typeof candidate.capturedAt !== "number" || typeof candidate.totalSpace !== "number" || typeof candidate.availableSpace !== "number" || typeof candidate.scannedBytes !== "number" || !candidate.categories || typeof candidate.categories !== "object" || Array.isArray(candidate.categories)) return null;
+  const categories = Object.fromEntries(Object.entries(candidate.categories).filter((entry): entry is [string, number] => typeof entry[1] === "number" && Number.isFinite(entry[1]) && entry[1] >= 0));
+  return { root: candidate.root, capturedAt: candidate.capturedAt, totalSpace: candidate.totalSpace, availableSpace: candidate.availableSpace, scannedBytes: candidate.scannedBytes, categories };
+}
+
+export function readSpaceScanHistory(): Record<string, SpaceScanSnapshot[]> {
   try {
     const value = JSON.parse(localStorage.getItem(SPACE_SCAN_SNAPSHOTS_KEY) ?? "{}");
     if (!value || typeof value !== "object" || Array.isArray(value)) return {};
-    return value as Record<string, SpaceScanSnapshot>;
+    return Object.fromEntries(Object.entries(value).flatMap(([root, stored]) => {
+      const candidates = Array.isArray(stored) ? stored : [stored];
+      const history = candidates.map(parseSpaceScanSnapshot).filter((snapshot): snapshot is SpaceScanSnapshot => snapshot !== null).sort((left, right) => left.capturedAt - right.capturedAt).slice(-MAX_SPACE_SCAN_SNAPSHOTS);
+      return history.length ? [[root, history]] : [];
+    }));
   } catch {
     return {};
   }
@@ -55,6 +73,15 @@ export function snapshotForSpaceScan(result: SpaceScanResult): SpaceScanSnapshot
     scannedBytes: result.scannedBytes,
     categories: Object.fromEntries(result.categories.map((category) => [category.id, category.size])),
   };
+}
+
+export function appendSpaceScanSnapshot(result: SpaceScanResult) {
+  const histories = readSpaceScanHistory();
+  const key = result.root.toLocaleLowerCase();
+  const history = [...(histories[key] ?? []), snapshotForSpaceScan(result)].slice(-MAX_SPACE_SCAN_SNAPSHOTS);
+  histories[key] = history;
+  localStorage.setItem(SPACE_SCAN_SNAPSHOTS_KEY, JSON.stringify(histories));
+  return history;
 }
 
 export function readStoredRecentPaths() {
