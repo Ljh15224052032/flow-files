@@ -1,6 +1,7 @@
 import type { TransferTask } from "../types";
 
 export type TaskFilter = "all" | "active" | "issues" | "completed";
+export type TaskModeFilter = "all" | "copy" | "move";
 
 export function taskMatchesFilter(task: TransferTask, filter: TaskFilter) {
   if (filter === "all") return true;
@@ -9,8 +10,17 @@ export function taskMatchesFilter(task: TransferTask, filter: TaskFilter) {
   return task.status === "completed" || task.status === "cancelled";
 }
 
-export function filterOperationTasks(tasks: TransferTask[], filter: TaskFilter) {
-  return tasks.filter((task) => taskMatchesFilter(task, filter));
+export function taskMatchesQuery(task: TransferTask, query: string) {
+  const normalized = query.trim().toLocaleLowerCase();
+  if (!normalized) return true;
+  return [task.destination, task.currentName, ...task.sourcePaths]
+    .some((value) => value.toLocaleLowerCase().includes(normalized));
+}
+
+export function filterOperationTasks(tasks: TransferTask[], filter: TaskFilter, query = "", mode: TaskModeFilter = "all") {
+  return tasks.filter((task) => taskMatchesFilter(task, filter)
+    && (mode === "all" || task.mode === mode)
+    && taskMatchesQuery(task, query));
 }
 
 export function retryableTaskPaths(task: TransferTask) {

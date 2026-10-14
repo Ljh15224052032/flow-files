@@ -1,7 +1,8 @@
+import { useState } from "react";
 import { UI_COPY } from "../localization";
 import type { TransferTask, UiLanguage } from "../types";
 import { formatDuration, formatSize } from "../lib/format";
-import { filterOperationTasks, retryableTaskPaths, type TaskFilter } from "../lib/task-utils";
+import { filterOperationTasks, retryableTaskPaths, type TaskFilter, type TaskModeFilter } from "../lib/task-utils";
 
 type TaskCenterProps = {
   tasks: TransferTask[];
@@ -37,9 +38,11 @@ export function TaskCenter({
   onClearFinished,
 }: TaskCenterProps) {
   const text = UI_COPY[language];
+  const [pathFilter, setPathFilter] = useState("");
+  const [modeFilter, setModeFilter] = useState<TaskModeFilter>("all");
   const activeCount = tasks.filter((task) => ACTIVE_STATUSES.includes(task.status)).length;
   const recoveredCount = tasks.filter((task) => task.recoveredFromRestart).length;
-  const filteredTasks = filterOperationTasks(tasks, filter);
+  const filteredTasks = filterOperationTasks(tasks, filter, pathFilter, modeFilter);
 
   function filterLabel(value: TaskFilter) {
     if (language === "zh-CN") return value === "all" ? "全部" : value === "active" ? "进行中" : value === "issues" ? "有问题" : "已完成";
@@ -72,10 +75,24 @@ export function TaskCenter({
         {FILTERS.map((value) => (
           <button key={value} className={filter === value ? "active" : ""} onClick={() => onFilterChange(value)}>
             {filterLabel(value)}
-            <b>{filterOperationTasks(tasks, value).length}</b>
+            <b>{filterOperationTasks(tasks, value, pathFilter, modeFilter).length}</b>
           </button>
         ))}
       </nav>
+
+      <div className="task-scope-filters">
+        <input
+          value={pathFilter}
+          onChange={(event) => setPathFilter(event.target.value)}
+          placeholder={language === "zh-CN" ? "筛选来源或目标路径" : "Filter source or destination"}
+          aria-label={language === "zh-CN" ? "按路径筛选任务" : "Filter tasks by path"}
+        />
+        <select value={modeFilter} onChange={(event) => setModeFilter(event.target.value as TaskModeFilter)} aria-label={language === "zh-CN" ? "按操作类型筛选" : "Filter by operation type"}>
+          <option value="all">{language === "zh-CN" ? "全部操作" : "All operations"}</option>
+          <option value="copy">{text.copy}</option>
+          <option value="move">{language === "zh-CN" ? "移动" : "Move"}</option>
+        </select>
+      </div>
 
       <div className="task-list">
         {filteredTasks.length === 0 ? (

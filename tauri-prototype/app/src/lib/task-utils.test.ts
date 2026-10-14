@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { TransferTask } from "../types";
-import { filterOperationTasks, prioritizeQueuedTask, retryableTaskPaths } from "./task-utils";
+import { filterOperationTasks, prioritizeQueuedTask, retryableTaskPaths, taskMatchesQuery } from "./task-utils";
 
 function task(status: TransferTask["status"], recoveredFromRestart = false, issueCount = 0): TransferTask {
   return {
@@ -22,6 +22,14 @@ describe("task center filters", () => {
 
   it("keeps failed, recovered, and partially completed issue tasks together", () => {
     expect(filterOperationTasks(tasks, "issues")).toHaveLength(3);
+  });
+
+  it("filters history by operation type and source or destination path", () => {
+    const copied = { ...task("completed"), jobId: "copy", sourcePaths: ["C:\\Photos\\portrait.jpg"], destination: "D:\\Backup" };
+    const moved = { ...task("completed"), jobId: "move", mode: "move" as const, sourcePaths: ["D:\\Downloads\\archive.zip"], destination: "E:\\Archive" };
+    expect(filterOperationTasks([copied, moved], "all", "photos", "copy")).toEqual([copied]);
+    expect(filterOperationTasks([copied, moved], "all", "archive", "move")).toEqual([moved]);
+    expect(taskMatchesQuery(moved, "downloads")).toBe(true);
   });
 
   it("moves a queued task ahead of other queued work without crossing the running task", () => {
