@@ -181,6 +181,10 @@ export function readStoredOperationTasks(): TransferTask[] {
   }
 }
 
+export function writeStoredOperationTasks(tasks: TransferTask[]) {
+  localStorage.setItem(OPERATION_TASKS_KEY, JSON.stringify(tasks.slice(-20)));
+}
+
 export function readStoredSession(): { tabs: FolderTab[]; activeTabId: number } | null {
   try {
     const value = JSON.parse(localStorage.getItem(SESSION_KEY) ?? "null") as { tabs?: unknown[]; activeTabId?: unknown } | null;

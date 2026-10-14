@@ -4,8 +4,9 @@ import {
 } from "../constants";
 import {
   appendSpaceScanSnapshot, readSpaceScanHistory, readSpaceScanSnapshots, readStoredFavorites,
-  readStoredOperationTasks, readStoredSession, snapshotForSpaceScan,
+  readStoredOperationTasks, readStoredSession, snapshotForSpaceScan, writeStoredOperationTasks,
 } from "./storage";
+import type { TransferTask } from "../types";
 
 class MemoryStorage implements Storage {
   private readonly values = new Map<string, string>();
@@ -56,6 +57,21 @@ describe("persisted Flow Files state", () => {
     expect(task.recoveredFromRestart).toBe(true);
     expect(task.processedBytes).toBe(50);
     expect(task.sourcePaths).toEqual(["C:\\source.txt"]);
+  });
+
+  it("persists only the latest twenty transfer tasks for shutdown recovery", () => {
+    const tasks = Array.from({ length: 24 }, (_, index) => ({
+      jobId: `job-${index}`, mode: "copy", sourcePaths: [`C:\\source-${index}.txt`], destination: "D:\\target",
+      conflict: "skip", conflictResolutions: [], status: "queued", queuedAt: index, startedAt: index,
+      finishedAt: null, paused: false, processedBytes: 0, totalBytes: 0, completedItems: 0, totalItems: 1,
+      currentName: "", phase: "scanning", scannedItems: 0, scannedBytes: 0, speed: 0, issues: [], error: null,
+      recoveredFromRestart: false,
+    } satisfies TransferTask));
+    writeStoredOperationTasks(tasks);
+    const stored = JSON.parse(localStorage.getItem(OPERATION_TASKS_KEY) ?? "[]") as TransferTask[];
+    expect(stored).toHaveLength(20);
+    expect(stored[0].jobId).toBe("job-4");
+    expect(stored[19].jobId).toBe("job-23");
   });
 
   it("sanitizes restored sessions instead of trusting arbitrary storage", () => {

@@ -8,7 +8,7 @@ import {
   CLAUDE_FULL_ACCESS_KEY, CLAUDE_PROVIDER_KEY, COLUMN_WIDTHS_KEY, DEFAULT_COLUMN_WIDTHS,
   DEFAULT_LIST_VIEWPORT_HEIGHT, FAVORITES_KEY, FAVORITE_COLLAPSE_KEY, LANGUAGE_KEY,
   MAX_CACHED_FILE_ICONS, MAX_CACHED_THUMBNAILS, MAX_UNDO_STEPS, OPERATION_RATE_LIMIT_KEY,
-  OPERATION_RATE_LIMITS, OPERATION_TASKS_KEY,
+  OPERATION_RATE_LIMITS,
   PREVIEW_PANE_KEY, RECENT_PATHS_KEY, SAVED_SEARCHES_KEY, SEARCH_EVERYTHING_KEY,
   SEARCH_HISTORY_KEY, SESSION_KEY, SHOW_EXTENSIONS_KEY, SHOW_HIDDEN_KEY, SORT_DIRECTION_KEY,
   SORT_KEY, UNDO_RETENTION_MS, UNDO_STACK_KEY,
@@ -38,7 +38,7 @@ import {
 import {
   appendSpaceScanSnapshot, readCollapsedFavoriteGroups, readSpaceScanHistory, readStoredFavorites,
   readStoredOperationTasks, readStoredRecentPaths, readStoredSavedSearches,
-  readStoredSearchHistory, readStoredSession, readStoredUndoStack,
+  readStoredSearchHistory, readStoredSession, readStoredUndoStack, writeStoredOperationTasks,
 } from "./lib/storage";
 import {
   ActionsIcon, ChevronIcon, EntryIcon, FolderGlyph, SettingsIcon, SortIcon, SpaceHealthIcon,
@@ -251,6 +251,7 @@ function App() {
   const unavailableLocationRef = useRef<DirectoryStatus | null>(null);
   const previewRequestRef = useRef(0);
   const operationExecutorRef = useRef<string | null>(null);
+  const operationTasksRef = useRef(operationTasks);
   const text = UI_COPY[language];
   const latestUndo = undoStack[undoStack.length - 1] ?? null;
   const activeTaskCount = operationTasks.filter((task) => ["queued", "running", "paused"].includes(task.status)).length;
@@ -488,9 +489,20 @@ function App() {
   }, [undoStack]);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => localStorage.setItem(OPERATION_TASKS_KEY, JSON.stringify(operationTasks.slice(-20))), 300);
+    operationTasksRef.current = operationTasks;
+    const timer = window.setTimeout(() => writeStoredOperationTasks(operationTasks), 300);
     return () => window.clearTimeout(timer);
   }, [operationTasks]);
+
+  useEffect(() => {
+    const flushOperationTasks = () => writeStoredOperationTasks(operationTasksRef.current);
+    window.addEventListener("pagehide", flushOperationTasks);
+    window.addEventListener("beforeunload", flushOperationTasks);
+    return () => {
+      window.removeEventListener("pagehide", flushOperationTasks);
+      window.removeEventListener("beforeunload", flushOperationTasks);
+    };
+  }, []);
 
   useEffect(() => {
     if (!sessionReadyRef.current || activeTabId === null) return;
@@ -1485,7 +1497,12 @@ function App() {
       currentName: "", phase: "scanning", scannedItems: 0, scannedBytes: 0, speed: 0, issues: [], error: null,
       recoveredFromRestart: false,
     };
-    setOperationTasks((current) => [...current.slice(-19), task]);
+    setOperationTasks((current) => {
+      const next = [...current.slice(-19), task];
+      operationTasksRef.current = next;
+      writeStoredOperationTasks(next);
+      return next;
+    });
     setStatus(language === "zh-CN" ? `已加入文件任务：${sourceClipboard.paths.length} 项` : `Added ${sourceClipboard.paths.length} item(s) to the file queue.`);
   }
 
