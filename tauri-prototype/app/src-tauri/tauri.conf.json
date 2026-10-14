@@ -20,10 +20,37 @@
       }
     ],
     "security": {
-      "csp": null,
+      "csp": {
+        "default-src": "'self' customprotocol: asset:",
+        "connect-src": "ipc: http://ipc.localhost",
+        "font-src": "'self' data:",
+        "img-src": "'self' asset: http://asset.localhost blob: data:",
+        "media-src": "'self' asset: http://asset.localhost blob:",
+        "style-src": "'self' 'unsafe-inline'",
+        "object-src": "'none'",
+        "frame-src": "'none'",
+        "base-uri": "'none'",
+        "form-action": "'none'"
+      },
+      "freezePrototype": true,
+      "headers": {
+        "X-Content-Type-Options": "nosniff"
+      },
       "assetProtocol": {
         "enable": true,
-        "scope": ["**"]
+        "scope": {
+          "allow": ["**/*"],
+          "deny": [
+            "$HOME/.ssh/**/*",
+            "$HOME/.gnupg/**/*",
+            "$HOME/.aws/**/*",
+            "$HOME/.azure/**/*",
+            "$HOME/.kube/**/*",
+            "$HOME/.config/gh/**/*",
+            "$HOME/.claude/**/*",
+            "$APPDATA/GitHub CLI/**/*"
+          ]
+        }
       }
     }
   },

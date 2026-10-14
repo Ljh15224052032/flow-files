@@ -36,19 +36,27 @@ use tauri::{Emitter, Manager};
 use windows::{
     core::{w, PCSTR, PCWSTR, PWSTR},
     Win32::{
-        Foundation::{GlobalFree, ERROR_NOT_FOUND, HANDLE, HGLOBAL, HINSTANCE, HWND, LPARAM, LRESULT, POINT, SIZE, WAIT_OBJECT_0, WPARAM},
+        Foundation::{
+            GlobalFree, ERROR_NOT_FOUND, HANDLE, HGLOBAL, HINSTANCE, HWND, LPARAM, LRESULT, POINT,
+            SIZE, WAIT_OBJECT_0, WPARAM,
+        },
         Graphics::Gdi::{
             CreateCompatibleDC, DeleteDC, DeleteObject, GetDIBits, BITMAPINFO, BITMAPINFOHEADER,
             BI_RGB, DIB_RGB_COLORS, HGDIOBJ,
         },
         Security::Credentials::{
-            CredDeleteW, CredFree, CredReadW, CredWriteW, CREDENTIALW,
-            CRED_PERSIST_LOCAL_MACHINE, CRED_TYPE_GENERIC,
+            CredDeleteW, CredFree, CredReadW, CredWriteW, CREDENTIALW, CRED_PERSIST_LOCAL_MACHINE,
+            CRED_TYPE_GENERIC,
         },
         Storage::FileSystem::{
             FindCloseChangeNotification, FindFirstChangeNotificationW, FindNextChangeNotification,
             FILE_NOTIFY_CHANGE_DIR_NAME, FILE_NOTIFY_CHANGE_FILE_NAME,
             FILE_NOTIFY_CHANGE_LAST_WRITE, FILE_NOTIFY_CHANGE_SIZE,
+        },
+        System::Registry::{
+            RegCloseKey, RegCreateKeyW, RegDeleteTreeW, RegDeleteValueW, RegOpenKeyExW,
+            RegQueryValueExW, RegSetValueExW, HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE,
+            KEY_READ, KEY_WRITE, REG_SZ,
         },
         System::{
             Com::{
@@ -67,11 +75,6 @@ use windows::{
             },
             Threading::WaitForSingleObject,
         },
-        System::Registry::{
-            RegCloseKey, RegCreateKeyW, RegDeleteTreeW, RegDeleteValueW, RegOpenKeyExW,
-            RegQueryValueExW, RegSetValueExW, HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE,
-            KEY_READ, KEY_WRITE, REG_SZ,
-        },
         UI::{
             Shell::{
                 BHID_DataObject, DragQueryFileW, IContextMenu, IShellFolder,
@@ -82,10 +85,11 @@ use windows::{
             },
             WindowsAndMessaging::{
                 CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyWindow,
-                DispatchMessageW, FindWindowW, GetCursorPos, GetMessageW, KillTimer, PostQuitMessage,
-                RegisterClassW, SendMessageW, SetForegroundWindow, SetTimer, TrackPopupMenuEx,
-                TranslateMessage, MSG, SW_SHOWNORMAL, TPM_RETURNCMD, TPM_RIGHTBUTTON,
-                WINDOW_EX_STYLE, WINDOW_STYLE, WM_COPYDATA, WM_TIMER, WM_USER, WNDCLASSW,
+                DispatchMessageW, FindWindowW, GetCursorPos, GetMessageW, KillTimer,
+                PostQuitMessage, RegisterClassW, SendMessageW, SetForegroundWindow, SetTimer,
+                TrackPopupMenuEx, TranslateMessage, MSG, SW_SHOWNORMAL, TPM_RETURNCMD,
+                TPM_RIGHTBUTTON, WINDOW_EX_STYLE, WINDOW_STYLE, WM_COPYDATA, WM_TIMER, WM_USER,
+                WNDCLASSW,
             },
         },
     },
@@ -600,15 +604,24 @@ fn external_open_targets(args: &[String], cwd: &Path) -> Vec<ExternalOpenTarget>
             continue;
         }
         let candidate = PathBuf::from(raw);
-        let candidate = if candidate.is_absolute() { candidate } else { cwd.join(candidate) };
+        let candidate = if candidate.is_absolute() {
+            candidate
+        } else {
+            cwd.join(candidate)
+        };
         let canonical = match candidate.canonicalize() {
             Ok(path) => path,
             Err(_) => continue,
         };
         let target = if canonical.is_dir() {
-            ExternalOpenTarget { directory: public_path(&canonical), selected_path: None }
+            ExternalOpenTarget {
+                directory: public_path(&canonical),
+                selected_path: None,
+            }
         } else if canonical.is_file() {
-            let Some(parent) = canonical.parent() else { continue; };
+            let Some(parent) = canonical.parent() else {
+                continue;
+            };
             ExternalOpenTarget {
                 directory: public_path(parent),
                 selected_path: Some(public_path(&canonical)),
@@ -633,7 +646,11 @@ fn queue_external_open_targets<R: tauri::Runtime>(
     args: &[String],
     cwd: &str,
 ) {
-    let base = if cwd.trim().is_empty() { env::current_dir().unwrap_or_else(|_| PathBuf::from("C:\\")) } else { PathBuf::from(cwd) };
+    let base = if cwd.trim().is_empty() {
+        env::current_dir().unwrap_or_else(|_| PathBuf::from("C:\\"))
+    } else {
+        PathBuf::from(cwd)
+    };
     let targets = external_open_targets(args, &base);
     if targets.is_empty() {
         return;
@@ -668,12 +685,19 @@ fn wide_registry(value: &str) -> Vec<u16> {
 }
 
 #[cfg(windows)]
-fn registry_read_string(key_path: &str, value_name: Option<&str>) -> Result<Option<String>, String> {
+fn registry_read_string(
+    key_path: &str,
+    value_name: Option<&str>,
+) -> Result<Option<String>, String> {
     registry_read_string_from(HKEY_CURRENT_USER, key_path, value_name)
 }
 
 #[cfg(windows)]
-fn registry_read_string_from(root: HKEY, key_path: &str, value_name: Option<&str>) -> Result<Option<String>, String> {
+fn registry_read_string_from(
+    root: HKEY,
+    key_path: &str,
+    value_name: Option<&str>,
+) -> Result<Option<String>, String> {
     let mut key = HKEY::default();
     let path = wide_registry(key_path);
     let open = unsafe { RegOpenKeyExW(root, PCWSTR(path.as_ptr()), None, KEY_READ, &mut key) };
@@ -681,21 +705,44 @@ fn registry_read_string_from(root: HKEY, key_path: &str, value_name: Option<&str
         return Ok(None);
     }
     let name = value_name.map(wide_registry);
-    let name = name.as_ref().map(|value| PCWSTR(value.as_ptr())).unwrap_or(PCWSTR::null());
+    let name = name
+        .as_ref()
+        .map(|value| PCWSTR(value.as_ptr()))
+        .unwrap_or(PCWSTR::null());
     let mut bytes = 0u32;
     let queried = unsafe { RegQueryValueExW(key, name, None, None, None, Some(&mut bytes)) };
     if queried.0 != 0 || bytes < 2 {
-        unsafe { let _ = RegCloseKey(key); }
+        unsafe {
+            let _ = RegCloseKey(key);
+        }
         return Ok(None);
     }
     let mut data = vec![0u8; bytes as usize];
-    let read = unsafe { RegQueryValueExW(key, name, None, None, Some(data.as_mut_ptr()), Some(&mut bytes)) };
-    unsafe { let _ = RegCloseKey(key); }
+    let read = unsafe {
+        RegQueryValueExW(
+            key,
+            name,
+            None,
+            None,
+            Some(data.as_mut_ptr()),
+            Some(&mut bytes),
+        )
+    };
+    unsafe {
+        let _ = RegCloseKey(key);
+    }
     if read.0 != 0 {
-        return Err(app_error(format!("Unable to read Windows integration setting ({})", read.0)));
+        return Err(app_error(format!(
+            "Unable to read Windows integration setting ({})",
+            read.0
+        )));
     }
     let words = unsafe { std::slice::from_raw_parts(data.as_ptr() as *const u16, data.len() / 2) };
-    Ok(Some(String::from_utf16_lossy(words).trim_end_matches('\0').to_string()))
+    Ok(Some(
+        String::from_utf16_lossy(words)
+            .trim_end_matches('\0')
+            .to_string(),
+    ))
 }
 
 #[cfg(windows)]
@@ -717,21 +764,38 @@ fn everything_service_executable() -> Option<PathBuf> {
 }
 
 #[cfg(windows)]
-fn registry_write_string(key_path: &str, value_name: Option<&str>, value: &str) -> Result<(), String> {
+fn registry_write_string(
+    key_path: &str,
+    value_name: Option<&str>,
+    value: &str,
+) -> Result<(), String> {
     let mut key = HKEY::default();
     let path = wide_registry(key_path);
     let created = unsafe { RegCreateKeyW(HKEY_CURRENT_USER, PCWSTR(path.as_ptr()), &mut key) };
     if created.0 != 0 {
-        return Err(app_error(format!("Unable to create Windows integration setting ({})", created.0)));
+        return Err(app_error(format!(
+            "Unable to create Windows integration setting ({})",
+            created.0
+        )));
     }
     let name = value_name.map(wide_registry);
-    let name = name.as_ref().map(|item| PCWSTR(item.as_ptr())).unwrap_or(PCWSTR::null());
+    let name = name
+        .as_ref()
+        .map(|item| PCWSTR(item.as_ptr()))
+        .unwrap_or(PCWSTR::null());
     let wide_value = wide_registry(value);
-    let bytes = unsafe { std::slice::from_raw_parts(wide_value.as_ptr() as *const u8, wide_value.len() * 2) };
+    let bytes = unsafe {
+        std::slice::from_raw_parts(wide_value.as_ptr() as *const u8, wide_value.len() * 2)
+    };
     let written = unsafe { RegSetValueExW(key, name, None, REG_SZ, Some(bytes)) };
-    unsafe { let _ = RegCloseKey(key); }
+    unsafe {
+        let _ = RegCloseKey(key);
+    }
     if written.0 != 0 {
-        return Err(app_error(format!("Unable to save Windows integration setting ({})", written.0)));
+        return Err(app_error(format!(
+            "Unable to save Windows integration setting ({})",
+            written.0
+        )));
     }
     Ok(())
 }
@@ -740,16 +804,32 @@ fn registry_write_string(key_path: &str, value_name: Option<&str>, value: &str) 
 fn registry_delete_value(key_path: &str, value_name: Option<&str>) -> Result<(), String> {
     let mut key = HKEY::default();
     let path = wide_registry(key_path);
-    let open = unsafe { RegOpenKeyExW(HKEY_CURRENT_USER, PCWSTR(path.as_ptr()), None, KEY_WRITE, &mut key) };
+    let open = unsafe {
+        RegOpenKeyExW(
+            HKEY_CURRENT_USER,
+            PCWSTR(path.as_ptr()),
+            None,
+            KEY_WRITE,
+            &mut key,
+        )
+    };
     if open.0 != 0 {
         return Ok(());
     }
     let name = value_name.map(wide_registry);
-    let name = name.as_ref().map(|item| PCWSTR(item.as_ptr())).unwrap_or(PCWSTR::null());
+    let name = name
+        .as_ref()
+        .map(|item| PCWSTR(item.as_ptr()))
+        .unwrap_or(PCWSTR::null());
     let deleted = unsafe { RegDeleteValueW(key, name) };
-    unsafe { let _ = RegCloseKey(key); }
+    unsafe {
+        let _ = RegCloseKey(key);
+    }
     if deleted.0 != 0 && deleted.0 != 2 {
-        return Err(app_error(format!("Unable to restore Windows integration setting ({})", deleted.0)));
+        return Err(app_error(format!(
+            "Unable to restore Windows integration setting ({})",
+            deleted.0
+        )));
     }
     Ok(())
 }
@@ -757,7 +837,9 @@ fn registry_delete_value(key_path: &str, value_name: Option<&str>) -> Result<(),
 #[cfg(windows)]
 fn registry_delete_tree(key_path: &str) {
     let path = wide_registry(key_path);
-    unsafe { let _ = RegDeleteTreeW(HKEY_CURRENT_USER, PCWSTR(path.as_ptr())); }
+    unsafe {
+        let _ = RegDeleteTreeW(HKEY_CURRENT_USER, PCWSTR(path.as_ptr()));
+    }
 }
 
 #[cfg(windows)]
@@ -771,7 +853,11 @@ fn folder_integration_status() -> Result<FolderIntegrationStatus, String> {
     let command = folder_integration_command()?;
     let enabled = FOLDER_INTEGRATION_CLASSES.iter().all(|class| {
         let shell_key = format!("Software\\Classes\\{class}\\shell");
-        registry_read_string(&shell_key, None).ok().flatten().as_deref() == Some("FlowFiles")
+        registry_read_string(&shell_key, None)
+            .ok()
+            .flatten()
+            .as_deref()
+            == Some("FlowFiles")
     });
     Ok(FolderIntegrationStatus { enabled, command })
 }
@@ -786,11 +872,22 @@ fn apply_folder_integration_enabled(enabled: bool) -> Result<FolderIntegrationSt
         for class in FOLDER_INTEGRATION_CLASSES {
             let shell_key = format!("Software\\Classes\\{class}\\shell");
             let previous = registry_read_string(&shell_key, None)?;
-            registry_write_string(FOLDER_INTEGRATION_BACKUP_KEY, Some(&format!("{class}.hadDefault")), if previous.is_some() { "1" } else { "0" })?;
+            registry_write_string(
+                FOLDER_INTEGRATION_BACKUP_KEY,
+                Some(&format!("{class}.hadDefault")),
+                if previous.is_some() { "1" } else { "0" },
+            )?;
             if let Some(previous) = previous {
-                registry_write_string(FOLDER_INTEGRATION_BACKUP_KEY, Some(&format!("{class}.previousDefault")), &previous)?;
+                registry_write_string(
+                    FOLDER_INTEGRATION_BACKUP_KEY,
+                    Some(&format!("{class}.previousDefault")),
+                    &previous,
+                )?;
             } else {
-                let _ = registry_delete_value(FOLDER_INTEGRATION_BACKUP_KEY, Some(&format!("{class}.previousDefault")));
+                let _ = registry_delete_value(
+                    FOLDER_INTEGRATION_BACKUP_KEY,
+                    Some(&format!("{class}.previousDefault")),
+                );
             }
             registry_write_string(&format!("{shell_key}\\FlowFiles\\command"), None, &command)?;
             registry_write_string(&shell_key, None, "FlowFiles")?;
@@ -801,9 +898,17 @@ fn apply_folder_integration_enabled(enabled: bool) -> Result<FolderIntegrationSt
             let shell_key = format!("Software\\Classes\\{class}\\shell");
             let active = registry_read_string(&shell_key, None)?;
             if active.as_deref() == Some("FlowFiles") {
-                let had_previous = registry_read_string(FOLDER_INTEGRATION_BACKUP_KEY, Some(&format!("{class}.hadDefault")))?.as_deref() == Some("1");
+                let had_previous = registry_read_string(
+                    FOLDER_INTEGRATION_BACKUP_KEY,
+                    Some(&format!("{class}.hadDefault")),
+                )?
+                .as_deref()
+                    == Some("1");
                 if had_previous {
-                    if let Some(previous) = registry_read_string(FOLDER_INTEGRATION_BACKUP_KEY, Some(&format!("{class}.previousDefault")))? {
+                    if let Some(previous) = registry_read_string(
+                        FOLDER_INTEGRATION_BACKUP_KEY,
+                        Some(&format!("{class}.previousDefault")),
+                    )? {
                         registry_write_string(&shell_key, None, &previous)?;
                     } else {
                         registry_delete_value(&shell_key, None)?;
@@ -833,10 +938,13 @@ fn folder_context_menu_background_key() -> String {
 fn folder_context_menu_status() -> Result<FolderIntegrationStatus, String> {
     let command = folder_integration_command()?;
     let folders_enabled = FOLDER_CONTEXT_MENU_CLASSES.iter().all(|class| {
-        registry_read_string(&format!("{}\\command", folder_context_menu_verb_key(class)), None)
-            .ok()
-            .flatten()
-            .as_deref()
+        registry_read_string(
+            &format!("{}\\command", folder_context_menu_verb_key(class)),
+            None,
+        )
+        .ok()
+        .flatten()
+        .as_deref()
             == Some(command.as_str())
     });
     let background_enabled = registry_read_string(
@@ -857,7 +965,11 @@ fn write_folder_context_menu_verb(key: &str, command: &str, label: &str) -> Resu
     let executable = env::current_exe().map_err(|error| app_error(error.to_string()))?;
     registry_write_string(key, None, label)?;
     registry_write_string(key, Some("MUIVerb"), label)?;
-    registry_write_string(key, Some("Icon"), &format!("\"{}\",0", public_path(&executable)))?;
+    registry_write_string(
+        key,
+        Some("Icon"),
+        &format!("\"{}\",0", public_path(&executable)),
+    )?;
     registry_write_string(key, Some("Position"), "Top")?;
     registry_write_string(key, Some("MultiSelectModel"), "Document")?;
     registry_write_string(&format!("{key}\\command"), None, command)
@@ -926,14 +1038,24 @@ fn trust_claude_workspace(path: &str) -> Result<(), String> {
         .write(true)
         .create(true)
         .open(&config_path)
-        .map_err(|error| app_error(format!("Unable to open Claude's user configuration: {error}")))?;
-    file.lock_exclusive()
-        .map_err(|error| app_error(format!("Unable to lock Claude's user configuration: {error}")))?;
+        .map_err(|error| {
+            app_error(format!(
+                "Unable to open Claude's user configuration: {error}"
+            ))
+        })?;
+    file.lock_exclusive().map_err(|error| {
+        app_error(format!(
+            "Unable to lock Claude's user configuration: {error}"
+        ))
+    })?;
 
     let result = (|| {
         let mut source = String::new();
-        file.read_to_string(&mut source)
-            .map_err(|error| app_error(format!("Unable to read Claude's user configuration: {error}")))?;
+        file.read_to_string(&mut source).map_err(|error| {
+            app_error(format!(
+                "Unable to read Claude's user configuration: {error}"
+            ))
+        })?;
         let mut config = if source.trim().is_empty() {
             json!({})
         } else {
@@ -944,15 +1066,28 @@ fn trust_claude_workspace(path: &str) -> Result<(), String> {
             })?
         };
         mark_claude_project_trusted(&mut config, &claude_project_key(path))?;
-        let output = serde_json::to_vec_pretty(&config)
-            .map_err(|error| app_error(format!("Unable to serialize Claude's user configuration: {error}")))?;
-        file.set_len(0)
-            .map_err(|error| app_error(format!("Unable to update Claude's user configuration: {error}")))?;
-        file.seek(SeekFrom::Start(0))
-            .map_err(|error| app_error(format!("Unable to update Claude's user configuration: {error}")))?;
+        let output = serde_json::to_vec_pretty(&config).map_err(|error| {
+            app_error(format!(
+                "Unable to serialize Claude's user configuration: {error}"
+            ))
+        })?;
+        file.set_len(0).map_err(|error| {
+            app_error(format!(
+                "Unable to update Claude's user configuration: {error}"
+            ))
+        })?;
+        file.seek(SeekFrom::Start(0)).map_err(|error| {
+            app_error(format!(
+                "Unable to update Claude's user configuration: {error}"
+            ))
+        })?;
         file.write_all(&output)
             .and_then(|_| file.sync_all())
-            .map_err(|error| app_error(format!("Unable to save Claude's user configuration: {error}")))
+            .map_err(|error| {
+                app_error(format!(
+                    "Unable to save Claude's user configuration: {error}"
+                ))
+            })
     })();
     let _ = FileExt::unlock(&file);
     result
@@ -2340,9 +2475,7 @@ fn space_category(path: &Path) -> Option<(&'static str, &'static str)> {
     if normalized.contains("\\$recycle.bin\\") {
         return Some(("recycleBin", "safe"));
     }
-    if normalized.contains("\\appdata\\local\\temp\\")
-        || normalized.contains("\\windows\\temp\\")
-    {
+    if normalized.contains("\\appdata\\local\\temp\\") || normalized.contains("\\windows\\temp\\") {
         return Some(("temporaryFiles", "safe"));
     }
     if normalized.contains("\\windows\\softwaredistribution\\download\\") {
@@ -2380,8 +2513,7 @@ fn space_category(path: &Path) -> Option<(&'static str, &'static str)> {
         .extension()
         .map(|value| value.to_string_lossy().to_lowercase())
         .unwrap_or_default();
-    if ["exe", "msi", "msix", "iso", "zip", "rar", "7z", "tar", "gz"]
-        .contains(&extension.as_str())
+    if ["exe", "msi", "msix", "iso", "zip", "rar", "7z", "tar", "gz"].contains(&extension.as_str())
     {
         return Some(("installersArchives", "review"));
     }
@@ -2391,9 +2523,7 @@ fn space_category(path: &Path) -> Option<(&'static str, &'static str)> {
 fn space_cleanup_category(category_id: &str) -> Option<&'static str> {
     match category_id {
         "temporaryFiles" | "browserCache" => Some("safe"),
-        "aiModels" | "developerCaches" | "downloads" | "installersArchives" => {
-            Some("review")
-        }
+        "aiModels" | "developerCaches" | "downloads" | "installersArchives" => Some("review"),
         _ => None,
     }
 }
@@ -2404,13 +2534,13 @@ async fn preview_space_cleanup(
     category_id: String,
 ) -> Result<SpaceCleanupPreview, String> {
     let directory = require_directory(&root)?;
-    let risk = space_cleanup_category(&category_id)
-        .ok_or_else(|| app_error("This category can only be reviewed with the appropriate Windows tool."))?;
+    let risk = space_cleanup_category(&category_id).ok_or_else(|| {
+        app_error("This category can only be reviewed with the appropriate Windows tool.")
+    })?;
     tauri::async_runtime::spawn_blocking(move || {
         const MAX_CANDIDATES: usize = 500;
         let mut stack = vec![directory.clone()];
-        let mut candidates: BinaryHeap<Reverse<(u64, String, String, u64)>> =
-            BinaryHeap::new();
+        let mut candidates: BinaryHeap<Reverse<(u64, String, String, u64)>> = BinaryHeap::new();
         let mut total_bytes = 0u64;
         let mut total_files = 0usize;
         let mut issues = 0usize;
@@ -2468,7 +2598,7 @@ async fn preview_space_cleanup(
                     candidates.push(candidate);
                 } else if candidates
                     .peek()
-                    .map(|smallest| size > smallest.0.0)
+                    .map(|smallest| size > smallest.0 .0)
                     .unwrap_or(true)
                 {
                     candidates.pop();
@@ -2561,7 +2691,9 @@ async fn recycle_space_cleanup_paths(
             .map_err(|error| app_error(error.to_string()))?
             .into_iter()
             .filter(|item| !before.contains(&item.id.to_string_lossy().to_string()))
-            .filter(|item| original_paths.contains(&public_path(&item.original_path()).to_lowercase()))
+            .filter(|item| {
+                original_paths.contains(&public_path(&item.original_path()).to_lowercase())
+            })
             .map(|item| item.id.to_string_lossy().to_string())
             .collect::<Vec<_>>();
         Ok(FileOperationResult {
@@ -2570,7 +2702,11 @@ async fn recycle_space_cleanup_paths(
             cancelled: false,
             error: None,
             issues,
-            undo: if ids.is_empty() { None } else { Some(UndoAction::RestoreTrash { ids }) },
+            undo: if ids.is_empty() {
+                None
+            } else {
+                Some(UndoAction::RestoreTrash { ids })
+            },
         })
     })
     .await
@@ -2617,8 +2753,7 @@ async fn scan_disk_space(
     let result = tauri::async_runtime::spawn_blocking(move || {
         let mut stack = vec![directory.clone()];
         let mut top_directories: HashMap<PathBuf, u64> = HashMap::new();
-        let mut largest_files: BinaryHeap<Reverse<(u64, String, String, u64)>> =
-            BinaryHeap::new();
+        let mut largest_files: BinaryHeap<Reverse<(u64, String, String, u64)>> = BinaryHeap::new();
         let mut categories: HashMap<&'static str, (&'static str, u64, usize)> = HashMap::new();
         let mut scanned_bytes = 0u64;
         let mut scanned_files = 0usize;
@@ -2694,7 +2829,7 @@ async fn scan_disk_space(
                         largest_files.push(item);
                     } else if largest_files
                         .peek()
-                        .map(|smallest| size > smallest.0.0)
+                        .map(|smallest| size > smallest.0 .0)
                         .unwrap_or(true)
                     {
                         largest_files.pop();
@@ -2794,10 +2929,7 @@ async fn scan_disk_space(
 }
 
 #[tauri::command]
-fn cancel_space_scan(
-    jobs: tauri::State<'_, SpaceScanJobs>,
-    job_id: String,
-) -> Result<(), String> {
+fn cancel_space_scan(jobs: tauri::State<'_, SpaceScanJobs>, job_id: String) -> Result<(), String> {
     let active = jobs
         .0
         .lock()
@@ -2812,7 +2944,8 @@ fn quick_duplicate_fingerprint(path: &Path, size: u64) -> std::io::Result<[u8; 3
     let mut file = fs::File::open(path)?;
     let mut hasher = Sha256::new();
     hasher.update(size.to_le_bytes());
-    let sample_size = usize::try_from(size.min(DUPLICATE_QUICK_SAMPLE_BYTES as u64)).unwrap_or(DUPLICATE_QUICK_SAMPLE_BYTES);
+    let sample_size = usize::try_from(size.min(DUPLICATE_QUICK_SAMPLE_BYTES as u64))
+        .unwrap_or(DUPLICATE_QUICK_SAMPLE_BYTES);
     let mut buffer = vec![0u8; sample_size];
     if sample_size > 0 {
         file.read_exact(&mut buffer)?;
@@ -2842,7 +2975,10 @@ fn full_duplicate_fingerprint(path: &Path) -> std::io::Result<[u8; 32]> {
 }
 
 fn duplicate_signature(hash: &[u8; 32]) -> String {
-    hash.iter().take(8).map(|byte| format!("{byte:02x}")).collect()
+    hash.iter()
+        .take(8)
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 #[tauri::command]
@@ -2852,7 +2988,10 @@ async fn scan_duplicate_files(
     request: DuplicateScanRequest,
 ) -> Result<DuplicateScanResult, String> {
     let root = require_directory(&request.root)?;
-    let minimum_size = request.minimum_size.unwrap_or(DUPLICATE_MINIMUM_BYTES).max(1);
+    let minimum_size = request
+        .minimum_size
+        .unwrap_or(DUPLICATE_MINIMUM_BYTES)
+        .max(1);
     let cancel = Arc::new(AtomicBool::new(false));
     jobs.0
         .lock()
@@ -2892,7 +3031,10 @@ async fn scan_duplicate_files(
                 #[cfg(windows)]
                 let is_reparse = metadata.file_attributes() & 0x400 != 0;
                 #[cfg(not(windows))]
-                let is_reparse = item.file_type().map(|kind| kind.is_symlink()).unwrap_or(true);
+                let is_reparse = item
+                    .file_type()
+                    .map(|kind| kind.is_symlink())
+                    .unwrap_or(true);
                 if metadata.is_dir() {
                     if !is_reparse {
                         stack.push(path);
@@ -2906,18 +3048,28 @@ async fn scan_duplicate_files(
                         .ok()
                         .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
                         .map(|duration| duration.as_secs());
-                    by_size.entry(metadata.len()).or_default().push((path.clone(), modified));
+                    by_size
+                        .entry(metadata.len())
+                        .or_default()
+                        .push((path.clone(), modified));
                 }
                 if scanned_files % 512 == 0 {
-                    let candidate_files = by_size.values().filter(|group| group.len() > 1).map(Vec::len).sum();
-                    let _ = app.emit("duplicate-scan-progress", DuplicateScanProgress {
-                        job_id: job_id.clone(),
-                        phase: "scanning".into(),
-                        scanned_files,
-                        candidate_files,
-                        processed_bytes: 0,
-                        current_path: public_path(&path),
-                    });
+                    let candidate_files = by_size
+                        .values()
+                        .filter(|group| group.len() > 1)
+                        .map(Vec::len)
+                        .sum();
+                    let _ = app.emit(
+                        "duplicate-scan-progress",
+                        DuplicateScanProgress {
+                            job_id: job_id.clone(),
+                            phase: "scanning".into(),
+                            scanned_files,
+                            candidate_files,
+                            processed_bytes: 0,
+                            current_path: public_path(&path),
+                        },
+                    );
                 }
             }
         }
@@ -2926,7 +3078,10 @@ async fn scan_duplicate_files(
             .into_iter()
             .filter(|(_, files)| files.len() > 1)
             .collect::<Vec<_>>();
-        let candidate_files = size_candidates.iter().map(|(_, files)| files.len()).sum::<usize>();
+        let candidate_files = size_candidates
+            .iter()
+            .map(|(_, files)| files.len())
+            .sum::<usize>();
         let mut by_quick: HashMap<(u64, [u8; 32]), Vec<(PathBuf, Option<u64>)>> = HashMap::new();
         let mut processed_bytes = 0u64;
         for (size, files) in size_candidates {
@@ -2935,18 +3090,25 @@ async fn scan_duplicate_files(
                     break;
                 }
                 match quick_duplicate_fingerprint(&path, size) {
-                    Ok(hash) => by_quick.entry((size, hash)).or_default().push((path.clone(), modified)),
+                    Ok(hash) => by_quick
+                        .entry((size, hash))
+                        .or_default()
+                        .push((path.clone(), modified)),
                     Err(_) => issues += 1,
                 }
-                processed_bytes = processed_bytes.saturating_add(size.min((DUPLICATE_QUICK_SAMPLE_BYTES * 2) as u64));
-                let _ = app.emit("duplicate-scan-progress", DuplicateScanProgress {
-                    job_id: job_id.clone(),
-                    phase: "fingerprint".into(),
-                    scanned_files,
-                    candidate_files,
-                    processed_bytes,
-                    current_path: public_path(&path),
-                });
+                processed_bytes = processed_bytes
+                    .saturating_add(size.min((DUPLICATE_QUICK_SAMPLE_BYTES * 2) as u64));
+                let _ = app.emit(
+                    "duplicate-scan-progress",
+                    DuplicateScanProgress {
+                        job_id: job_id.clone(),
+                        phase: "fingerprint".into(),
+                        scanned_files,
+                        candidate_files,
+                        processed_bytes,
+                        current_path: public_path(&path),
+                    },
+                );
             }
         }
 
@@ -2957,18 +3119,24 @@ async fn scan_duplicate_files(
                     break;
                 }
                 match full_duplicate_fingerprint(&path) {
-                    Ok(hash) => by_full.entry((size, hash)).or_default().push((path.clone(), modified)),
+                    Ok(hash) => by_full
+                        .entry((size, hash))
+                        .or_default()
+                        .push((path.clone(), modified)),
                     Err(_) => issues += 1,
                 }
                 processed_bytes = processed_bytes.saturating_add(size);
-                let _ = app.emit("duplicate-scan-progress", DuplicateScanProgress {
-                    job_id: job_id.clone(),
-                    phase: "verifying".into(),
-                    scanned_files,
-                    candidate_files,
-                    processed_bytes,
-                    current_path: public_path(&path),
-                });
+                let _ = app.emit(
+                    "duplicate-scan-progress",
+                    DuplicateScanProgress {
+                        job_id: job_id.clone(),
+                        phase: "verifying".into(),
+                        scanned_files,
+                        candidate_files,
+                        processed_bytes,
+                        current_path: public_path(&path),
+                    },
+                );
             }
         }
 
@@ -2976,14 +3144,21 @@ async fn scan_duplicate_files(
             .into_iter()
             .filter(|(_, files)| files.len() > 1)
             .map(|((file_size, hash), files)| {
-                let reclaimable_bytes = file_size.saturating_mul(files.len().saturating_sub(1) as u64);
-                let files = files.into_iter().map(|(path, modified_unix_seconds)| SpaceScanItem {
-                    name: path.file_name().map(|name| name.to_string_lossy().to_string()).unwrap_or_default(),
-                    path: public_path(&path),
-                    size: file_size,
-                    modified_unix_seconds,
-                    is_directory: false,
-                }).collect();
+                let reclaimable_bytes =
+                    file_size.saturating_mul(files.len().saturating_sub(1) as u64);
+                let files = files
+                    .into_iter()
+                    .map(|(path, modified_unix_seconds)| SpaceScanItem {
+                        name: path
+                            .file_name()
+                            .map(|name| name.to_string_lossy().to_string())
+                            .unwrap_or_default(),
+                        path: public_path(&path),
+                        size: file_size,
+                        modified_unix_seconds,
+                        is_directory: false,
+                    })
+                    .collect();
                 DuplicateGroup {
                     signature: duplicate_signature(&hash),
                     file_size,
@@ -3032,7 +3207,9 @@ async fn recycle_verified_duplicates(
         .map(|group| group.recycle_paths.len())
         .sum::<usize>();
     if selected_count == 0 || selected_count > 500 {
-        return Err(app_error("Select between 1 and 500 reviewed duplicate files."));
+        return Err(app_error(
+            "Select between 1 and 500 reviewed duplicate files.",
+        ));
     }
 
     tauri::async_runtime::spawn_blocking(move || {
@@ -3161,16 +3338,15 @@ async fn check_directory_status(path: String) -> Result<DirectoryStatus, String>
     }
     .to_string();
     let kind_for_check = kind.clone();
-    let (available, reason) = tauri::async_runtime::spawn_blocking(move || {
-        match fs::metadata(&requested) {
+    let (available, reason) =
+        tauri::async_runtime::spawn_blocking(move || match fs::metadata(&requested) {
             Ok(metadata) if metadata.is_dir() => (true, None),
             Ok(_) => (false, Some("notFound".to_string())),
             Err(error) => {
                 let reason = directory_unavailable_reason(&error, &kind_for_check);
                 (false, Some(reason.to_string()))
             }
-        }
-    })
+        })
         .await
         .map_err(|error| app_error(error.to_string()))?;
     Ok(DirectoryStatus {
@@ -3438,7 +3614,9 @@ fn try_everything_search(
     cancel: &AtomicBool,
 ) -> Option<SearchResult> {
     if request.query.trim().is_empty()
-        && (request.modified_after.is_some() || request.min_size.is_some() || request.max_size.is_some())
+        && (request.modified_after.is_some()
+            || request.min_size.is_some()
+            || request.max_size.is_some())
     {
         return None;
     }
@@ -3464,13 +3642,17 @@ fn try_everything_search(
         }
         let directory = read_packed_utf16(&reply, path_offset)?;
         let path = PathBuf::from(directory).join(&name);
-        let Ok(metadata) = fs::metadata(&path) else { continue; };
+        let Ok(metadata) = fs::metadata(&path) else {
+            continue;
+        };
         let entry = entry_from_metadata(&path, name, &metadata);
         if entry.is_hidden && !request.include_hidden {
             continue;
         }
         let date_matches = request.modified_after.is_none_or(|after| {
-            entry.modified_unix_seconds.is_some_and(|modified| modified >= after)
+            entry
+                .modified_unix_seconds
+                .is_some_and(|modified| modified >= after)
         });
         let size_matches = if request.min_size.is_some() || request.max_size.is_some() {
             !entry.is_directory
@@ -5103,7 +5285,9 @@ fn save_claude_api_key(api_key: String) -> Result<ClaudeCredentialStatus, String
     #[cfg(not(windows))]
     {
         let _ = api_key;
-        Err(app_error("Secure API key storage is only available on Windows."))
+        Err(app_error(
+            "Secure API key storage is only available on Windows.",
+        ))
     }
 }
 
@@ -5111,9 +5295,9 @@ fn save_claude_api_key(api_key: String) -> Result<ClaudeCredentialStatus, String
 fn delete_claude_api_key() -> Result<ClaudeCredentialStatus, String> {
     #[cfg(windows)]
     {
-        if let Err(error) = unsafe {
-            CredDeleteW(DEEPSEEK_CREDENTIAL_TARGET, CRED_TYPE_GENERIC, None)
-        } {
+        if let Err(error) =
+            unsafe { CredDeleteW(DEEPSEEK_CREDENTIAL_TARGET, CRED_TYPE_GENERIC, None) }
+        {
             if error.code() != windows::core::HRESULT::from_win32(ERROR_NOT_FOUND.0) {
                 return Err(app_error(format!(
                     "Unable to delete the DeepSeek API key from Windows Credential Manager: {error}"
@@ -5228,7 +5412,12 @@ fn create_claude_diagnostic(provider: String) -> Result<ClaudeDiagnostic, String
             provider,
             endpoint: "https://api.deepseek.com/anthropic".into(),
             key_available: true,
-            status: if authentication_error { "authError" } else { "serviceError" }.into(),
+            status: if authentication_error {
+                "authError"
+            } else {
+                "serviceError"
+            }
+            .into(),
             message: format!("DeepSeek returned HTTP {}.", status_code.as_u16()),
             balance_available: None,
         });
@@ -5236,7 +5425,12 @@ fn create_claude_diagnostic(provider: String) -> Result<ClaudeDiagnostic, String
 
     let authenticated = claude
         .as_deref()
-        .and_then(|command| Command::new(command).args(["auth", "status", "--json"]).output().ok())
+        .and_then(|command| {
+            Command::new(command)
+                .args(["auth", "status", "--json"])
+                .output()
+                .ok()
+        })
         .map(|output| output.status.success())
         .unwrap_or(false);
     Ok(ClaudeDiagnostic {
@@ -5245,7 +5439,12 @@ fn create_claude_diagnostic(provider: String) -> Result<ClaudeDiagnostic, String
         provider: "anthropic".into(),
         endpoint: "https://api.anthropic.com".into(),
         key_available: authenticated,
-        status: if authenticated { "ready" } else { "notAuthenticated" }.into(),
+        status: if authenticated {
+            "ready"
+        } else {
+            "notAuthenticated"
+        }
+        .into(),
         message: if authenticated {
             "Claude Code reports an active Anthropic login.".into()
         } else {
@@ -5281,7 +5480,9 @@ fn get_folder_integration_status() -> Result<FolderIntegrationStatus, String> {
     }
     #[cfg(not(windows))]
     {
-        Err(app_error("Windows folder integration is only available on Windows."))
+        Err(app_error(
+            "Windows folder integration is only available on Windows.",
+        ))
     }
 }
 
@@ -5294,7 +5495,9 @@ fn set_folder_integration_enabled(enabled: bool) -> Result<FolderIntegrationStat
     #[cfg(not(windows))]
     {
         let _ = enabled;
-        Err(app_error("Windows folder integration is only available on Windows."))
+        Err(app_error(
+            "Windows folder integration is only available on Windows.",
+        ))
     }
 }
 
@@ -5306,7 +5509,9 @@ fn get_folder_context_menu_status() -> Result<FolderIntegrationStatus, String> {
     }
     #[cfg(not(windows))]
     {
-        Err(app_error("Windows Explorer context menu is only available on Windows."))
+        Err(app_error(
+            "Windows Explorer context menu is only available on Windows.",
+        ))
     }
 }
 
@@ -5319,7 +5524,9 @@ fn set_folder_context_menu_enabled(enabled: bool) -> Result<FolderIntegrationSta
     #[cfg(not(windows))]
     {
         let _ = enabled;
-        Err(app_error("Windows Explorer context menu is only available on Windows."))
+        Err(app_error(
+            "Windows Explorer context menu is only available on Windows.",
+        ))
     }
 }
 
@@ -5361,7 +5568,9 @@ fn open_terminal(
         if provider.as_deref() == Some("deepseek") {
             #[cfg(windows)]
             let api_key = deepseek_api_key()?.ok_or_else(|| {
-                app_error("DeepSeek is selected, but no API key has been saved in Flow Files settings.")
+                app_error(
+                    "DeepSeek is selected, but no API key has been saved in Flow Files settings.",
+                )
             })?;
             #[cfg(not(windows))]
             let api_key = String::new();
@@ -5477,6 +5686,113 @@ pub fn run() {
 mod tests {
     use super::*;
 
+    fn fresh_test_directory(label: &str) -> PathBuf {
+        let directory = env::temp_dir().join(format!(
+            "flow-files-{label}-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&directory).expect("create isolated test directory");
+        directory
+    }
+
+    #[test]
+    fn production_webview_has_a_restrictive_security_baseline() {
+        let config: Value = serde_json::from_str(include_str!("../tauri.conf.json"))
+            .expect("parse bundled Tauri configuration");
+        let security = &config["app"]["security"];
+        assert_eq!(security["freezePrototype"], Value::Bool(true));
+        assert!(security["csp"].is_object(), "CSP must never be disabled");
+        assert_eq!(security["csp"]["object-src"], "'none'");
+        assert_eq!(security["csp"]["frame-src"], "'none'");
+        assert_eq!(security["headers"]["X-Content-Type-Options"], "nosniff");
+        let denied = security["assetProtocol"]["scope"]["deny"]
+            .as_array()
+            .expect("asset protocol deny list");
+        assert!(denied.iter().any(|entry| entry == "$HOME/.ssh/**/*"));
+        assert!(denied.iter().any(|entry| entry == "$HOME/.claude/**/*"));
+    }
+
+    #[test]
+    fn rejects_unsafe_windows_leaf_names() {
+        for name in [
+            "",
+            ".",
+            "..",
+            "trailing. ",
+            "bad/name",
+            "bad:name",
+            "NUL",
+            "com1.txt",
+        ] {
+            assert!(
+                validate_leaf_name(name).is_err(),
+                "{name:?} must be rejected"
+            );
+        }
+        for name in ["正常文件.txt", "archive.zip", "COM10.txt", "notes (2).md"] {
+            assert!(
+                validate_leaf_name(name).is_ok(),
+                "{name:?} must be accepted"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_zip_path_traversal_and_cleans_partial_output() {
+        let sandbox = fresh_test_directory("unsafe-zip-test");
+        let archive_path = sandbox.join("unsafe.zip");
+        let file = fs::File::create(&archive_path).expect("create unsafe archive");
+        let mut archive = zip::ZipWriter::new(file);
+        archive
+            .start_file("../escaped.txt", zip::write::SimpleFileOptions::default())
+            .expect("add unsafe archive entry");
+        archive
+            .write_all(b"must not escape")
+            .expect("write unsafe entry");
+        archive.finish().expect("finish unsafe archive");
+
+        let result = tauri::async_runtime::block_on(extract_zip_archive(
+            archive_path.display().to_string(),
+            sandbox.display().to_string(),
+        ));
+        assert!(result.is_err(), "unsafe archive must be rejected");
+        assert!(!sandbox.join("escaped.txt").exists());
+        assert!(
+            !sandbox.join("unsafe").exists(),
+            "partial extraction must be removed"
+        );
+        fs::remove_dir_all(&sandbox).expect("remove unsafe ZIP test folder");
+    }
+
+    #[test]
+    fn detects_recursive_copy_destinations_and_generates_non_conflicting_names() {
+        let sandbox = fresh_test_directory("path-safety-test");
+        let source = sandbox.join("source");
+        fs::create_dir_all(source.join("nested")).expect("create source tree");
+        assert!(is_inside(&source, &source));
+        assert!(is_inside(&source, &source.join("nested")));
+        assert!(!is_inside(&source, &sandbox));
+
+        let existing = sandbox.join("report.txt");
+        fs::write(&existing, "first").expect("create existing file");
+        let second = keep_both_path(&existing);
+        assert_eq!(
+            second.file_name().and_then(|name| name.to_str()),
+            Some("report (2).txt")
+        );
+        fs::write(&second, "second").expect("create second file");
+        let third = keep_both_path(&existing);
+        assert_eq!(
+            third.file_name().and_then(|name| name.to_str()),
+            Some("report (3).txt")
+        );
+        fs::remove_dir_all(&sandbox).expect("remove path safety test folder");
+    }
+
     #[test]
     fn lists_creates_and_renames_inside_a_temporary_folder() {
         let sandbox =
@@ -5575,7 +5891,10 @@ mod tests {
             assert!(Path::new(&terminal_path).is_dir());
         }
         let external_targets = external_open_targets(
-            &[sandbox.display().to_string(), sandbox.join("renamed.txt").display().to_string()],
+            &[
+                sandbox.display().to_string(),
+                sandbox.join("renamed.txt").display().to_string(),
+            ],
             &sandbox,
         );
         let canonical_sandbox = public_path(
@@ -5608,8 +5927,7 @@ mod tests {
         )
         .expect("mark Flow workspace trusted");
         assert_eq!(
-            claude_config["projects"]["D:/Download/feishudownloads"]
-                ["hasTrustDialogAccepted"],
+            claude_config["projects"]["D:/Download/feishudownloads"]["hasTrustDialogAccepted"],
             Value::Bool(true)
         );
         assert_eq!(claude_config["projects"]["C:/existing"]["keep"], 1);
@@ -5648,11 +5966,22 @@ mod tests {
         let mut changed = payload.clone();
         changed[DUPLICATE_QUICK_SAMPLE_BYTES + 7] = 0x33;
         fs::write(&different, changed).expect("write different file");
-        let first_quick = quick_duplicate_fingerprint(&first, payload.len() as u64).expect("quick hash first");
-        let different_quick = quick_duplicate_fingerprint(&different, payload.len() as u64).expect("quick hash different");
-        assert_eq!(first_quick, different_quick, "middle-only changes intentionally survive the quick filter");
-        assert_eq!(full_duplicate_fingerprint(&first).expect("full hash first"), full_duplicate_fingerprint(&second).expect("full hash second"));
-        assert_ne!(full_duplicate_fingerprint(&first).expect("full hash first again"), full_duplicate_fingerprint(&different).expect("full hash different"));
+        let first_quick =
+            quick_duplicate_fingerprint(&first, payload.len() as u64).expect("quick hash first");
+        let different_quick = quick_duplicate_fingerprint(&different, payload.len() as u64)
+            .expect("quick hash different");
+        assert_eq!(
+            first_quick, different_quick,
+            "middle-only changes intentionally survive the quick filter"
+        );
+        assert_eq!(
+            full_duplicate_fingerprint(&first).expect("full hash first"),
+            full_duplicate_fingerprint(&second).expect("full hash second")
+        );
+        assert_ne!(
+            full_duplicate_fingerprint(&first).expect("full hash first again"),
+            full_duplicate_fingerprint(&different).expect("full hash different")
+        );
         fs::remove_dir_all(&sandbox).expect("remove duplicate test folder");
     }
 
@@ -5661,9 +5990,15 @@ mod tests {
     #[ignore = "requires a running local Everything installation"]
     fn queries_the_local_everything_index() {
         let root = env::current_dir().expect("current project directory");
-        let search = format!("\"{}\\\" \"Cargo.toml\"", public_path(&root).trim_end_matches('\\'));
+        let search = format!(
+            "\"{}\\\" \"Cargo.toml\"",
+            public_path(&root).trim_end_matches('\\')
+        );
         let reply = run_everything_ipc_query(&search).expect("query Everything IPC");
-        assert!(read_packed_u32(&reply, 8).unwrap_or(0) > 0, "Everything should find this project's Cargo.toml");
+        assert!(
+            read_packed_u32(&reply, 8).unwrap_or(0) > 0,
+            "Everything should find this project's Cargo.toml"
+        );
     }
 
     #[test]
