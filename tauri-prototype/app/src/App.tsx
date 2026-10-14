@@ -52,6 +52,7 @@ import { StatusBar } from "./components/StatusBar";
 import { UI_COPY } from "./localization";
 import { useAppUpdater } from "./hooks/useAppUpdater";
 import { prioritizeQueuedTask, retryableTaskPaths, type TaskFilter } from "./lib/task-utils";
+import { buildSpaceReport } from "./lib/space-report";
 
 
 function suggestedDuplicateKeep(group: DuplicateGroup) {
@@ -3057,7 +3058,7 @@ function App() {
           {spaceScanning ? <button className="space-scan-action secondary" onClick={cancelSpaceScan}>{text.stopScan}</button> : <button className="space-scan-action" disabled={!drives.length} onClick={() => void startSpaceScan()}>{result ? text.rescan : text.startScan}</button>}
         </div>
         <div className="space-health-body">
-          {(result || scanningSubdirectory) && <div className="space-scope-bar"><button disabled={!scanningSubdirectory || spaceScanning} onClick={scanParentSpaceDirectory}>←</button><div><span>{language === "zh-CN" ? "扫描范围" : "Scan scope"}</span><strong title={spaceScanRoot}>{spaceScanRoot}</strong></div>{result && <button className="space-open-scope" onClick={() => void openSpaceScanItem({ name: labelForPath(result.root), path: result.root, size: result.scannedBytes, modifiedUnixSeconds: null, isDirectory: true })}>{text.openLocation}</button>}</div>}
+          {(result || scanningSubdirectory) && <div className="space-scope-bar"><button disabled={!scanningSubdirectory || spaceScanning} onClick={scanParentSpaceDirectory}>←</button><div><span>{language === "zh-CN" ? "扫描范围" : "Scan scope"}</span><strong title={spaceScanRoot}>{spaceScanRoot}</strong></div>{result && <div className="space-scope-actions"><button onClick={() => { void invoke("set_text_clipboard", { text: buildSpaceReport(result, language) }).then(() => setStatus(language === "zh-CN" ? "诊断报告已复制到剪贴板" : "Diagnostic report copied to the clipboard")).catch((error) => setStatus(language === "zh-CN" ? `无法复制诊断报告：${String(error)}` : `Could not copy the diagnostic report: ${String(error)}`)); }}>{language === "zh-CN" ? "复制报告" : "Copy report"}</button><button className="space-open-scope" onClick={() => void openSpaceScanItem({ name: labelForPath(result.root), path: result.root, size: result.scannedBytes, modifiedUnixSeconds: null, isDirectory: true })}>{text.openLocation}</button></div>}</div>}
           {spaceScanning && <section className="space-scan-running"><div className="space-scan-running-heading"><strong>{text.scanningSpace}</strong><span>{formatSize(spaceScanProgress?.scannedBytes ?? 0)} · {spaceScanProgress?.scannedFiles ?? 0} {language === "zh-CN" ? "个文件" : "files"}</span></div><div className="space-health-progress indeterminate"><i /></div><small title={spaceScanProgress?.currentPath}>{spaceScanProgress?.currentPath}</small></section>}
           {spaceScanError && <div className="space-scan-error"><strong>{language === "zh-CN" ? "扫描未完成" : "Scan did not finish"}</strong><span>{spaceScanError}</span></div>}
           {!result && !spaceScanning && !spaceScanError && <div className="space-health-empty"><SpaceHealthIcon /><strong>{text.noScanYet}</strong><span>{text.scanCoverageHint}</span></div>}
