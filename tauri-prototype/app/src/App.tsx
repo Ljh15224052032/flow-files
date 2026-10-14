@@ -1,111 +1,50 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type UIEvent } from "react";
-import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import brandIcon from "../src-tauri/icons/flow-files.svg";
 import "./App.css";
-
-type FileEntry = { name: string; path: string; isDirectory: boolean; size: number; modifiedUnixSeconds: number | null; extension: string | null; isHidden: boolean; isLink: boolean; linkTarget: string | null };
-type FavoriteItem = { path: string; label: string | null; group: string | null };
-type DirectoryListing = { path: string; entries: FileEntry[]; folderCount: number; fileCount: number };
-type Location = { label: string; path: string; totalSpace: number | null; availableSpace: number | null; isAvailable: boolean };
-type FolderTab = { id: number; path: string; label: string; pinned: boolean; history: string[]; historyIndex: number; scrollTop: number; viewMode: ViewMode; selectedPaths: string[] };
-type Thumbnail = { path: string; dataUrl: string };
-type FilePreview = { kind: "image" | "text" | "pdf" | "svg" | "heic" | "audio" | "video" | "office" | "none"; dataUrl: string | null; text: string | null; truncated: boolean; encoding: string | null; textOffset: number; totalBytes: number };
-type FileDetail = { key: string; value: string };
-type FileDetails = { items: FileDetail[] };
-type SortKey = "name" | "modified" | "type" | "size";
-type SortDirection = "ascending" | "descending";
-type ViewMode = "comfortable" | "compact" | "grid";
-type ResizableColumn = "modified" | "type" | "size";
-type ColumnWidths = Record<ResizableColumn, number>;
-type UiLanguage = "zh-CN" | "en";
-type ClaudeProvider = "anthropic" | "deepseek";
-type ClaudeCredentialStatus = { stored: boolean; environmentAvailable: boolean };
-type ClaudeDiagnostic = { claudeFound: boolean; version: string | null; provider: string; endpoint: string; keyAvailable: boolean; status: "ready" | "claudeMissing" | "missingKey" | "networkError" | "authError" | "serviceError" | "notAuthenticated"; message: string; balanceAvailable: boolean | null };
-type ClipboardState = { mode: "copy" | "move"; paths: string[] };
-type ClipboardPayload = ClipboardState;
-type PathPair = { from: string; to: string };
-type UndoAction = { kind: "deleteCreated"; paths: string[] } | { kind: "move"; pairs: PathPair[] } | { kind: "restoreTrash"; ids: string[] };
-type UndoRecord = { id: string; action: UndoAction; label: string; createdAt: number };
-type OperationIssue = { path: string; code: "accessDenied" | "inUse" | "diskFull" | "pathTooLong" | "network" | "notFound" | "other"; message: string };
-type FileOperationResult = { completed: number; skipped: number; cancelled: boolean; error: string | null; issues: OperationIssue[]; undo: UndoAction | null };
-type OperationProgress = { jobId: string; processedBytes: number; totalBytes: number; completedItems: number; totalItems: number; currentName: string };
-type OperationPhase = "scanning" | "transfer";
-type OperationScanProgress = OperationProgress & { phase: OperationPhase; scannedItems: number; scannedBytes: number };
-type RunningOperation = OperationScanProgress & { mode: "copy" | "move"; paused: boolean; startedAt: number; speed: number };
-type TransferTaskStatus = "queued" | "running" | "paused" | "completed" | "cancelled" | "failed";
-type ConflictChoice = "replace" | "skip" | "keepBoth";
-type ConflictEntry = { source: FileEntry; target: FileEntry };
-type ConflictResolution = { source: string; action: ConflictChoice };
-type TransferTask = RunningOperation & { sourcePaths: string[]; destination: string; conflict: ConflictChoice; conflictResolutions: ConflictResolution[]; status: TransferTaskStatus; queuedAt: number; finishedAt: number | null; issues: OperationIssue[]; error: string | null };
-type PendingTransfer = { clipboard: ClipboardState; destination: string; conflicts: ConflictEntry[]; currentIndex: number; resolutions: ConflictResolution[] };
-type RetryTransfer = { clipboard: ClipboardState; destination: string; conflict: ConflictChoice; conflictResolutions: ConflictResolution[] };
-type DirectoryChanged = { path: string };
-type DirectoryLoadProgress = { jobId: string; path: string; entries: FileEntry[]; scanned: number; folderCount: number; fileCount: number };
-type PathSuggestion = { path: string; label: string; source: "recent" | "folder" };
-type FolderSizeProgress = { jobId: string; totalBytes: number; scannedFiles: number; scannedFolders: number };
-type FolderSizeResult = { path: string; totalBytes: number; scannedFiles: number; scannedFolders: number; issues: number; cancelled: boolean };
-type FolderSizeState = FolderSizeResult & { running: boolean };
-type SpaceScanProgress = { jobId: string; scannedBytes: number; scannedFiles: number; scannedFolders: number; issues: number; currentPath: string };
-type SpaceScanItem = { name: string; path: string; size: number; modifiedUnixSeconds: number | null; isDirectory: boolean };
-type SpaceScanCategory = { id: string; risk: "safe" | "review" | "protected"; size: number; fileCount: number };
-type SpaceScanResult = { root: string; totalSpace: number; availableSpace: number; scannedBytes: number; scannedFiles: number; scannedFolders: number; issues: number; skippedReparsePoints: number; cancelled: boolean; largestFiles: SpaceScanItem[]; largestDirectories: SpaceScanItem[]; categories: SpaceScanCategory[] };
-type SpaceScanSnapshot = { root: string; capturedAt: number; totalSpace: number; availableSpace: number; scannedBytes: number; categories: Record<string, number> };
-type SpaceCleanupPreview = { root: string; categoryId: string; risk: "safe" | "review"; totalBytes: number; totalFiles: number; candidates: SpaceScanItem[]; truncated: boolean; issues: number };
-type SpaceCategoryAdvice = { summary: string; action: string; caution: string; cleanable: boolean };
-type SpaceCleanupAge = "all" | "30" | "90" | "365";
-type DirectoryStatus = { path: string; available: boolean; kind: "network" | "drive" | "folder"; reason: "accessDenied" | "notFound" | "unreachable" | "timeout" | "unknown" | null };
-type DragGhost = { x: number; y: number; count: number; mode: "copy" | "move" | "blocked"; targetLabel: string | null };
-type SearchKind = "all" | "folders" | "images" | "documents" | "videos" | "audio" | "archives";
-type SearchDate = "any" | "day" | "week" | "month" | "year";
-type SearchSize = "any" | "small" | "medium" | "large";
-type SearchProfile = { query: string; kind: SearchKind; date: SearchDate; size: SearchSize };
-type SearchHistoryItem = SearchProfile & { usedAt: number };
-type SavedSearch = SearchProfile & { id: string; name: string };
-type SearchProgress = { jobId: string; scanned: number; matches: number; currentPath: string };
-type SearchProvider = "everything" | "native";
-type SearchResult = { entries: FileEntry[]; scanned: number; cancelled: boolean; truncated: boolean; provider: SearchProvider };
-type EverythingStatus = { installed: boolean; running: boolean; databaseLoaded: boolean; version: string | null; executable: string | null; indexedDrives: string[] };
-type DuplicateScanProgress = { jobId: string; phase: "scanning" | "fingerprint" | "verifying"; scannedFiles: number; candidateFiles: number; processedBytes: number; currentPath: string };
-type DuplicateGroup = { signature: string; fileSize: number; reclaimableBytes: number; files: SpaceScanItem[] };
-type DuplicateScanResult = { root: string; scannedFiles: number; candidateFiles: number; processedBytes: number; reclaimableBytes: number; issues: number; cancelled: boolean; truncated: boolean; groups: DuplicateGroup[] };
-type DuplicateSizeFilter = "all" | "10mb" | "100mb" | "1gb";
-type DuplicateTypeFilter = "all" | "images" | "videos" | "audio" | "documents" | "archives" | "other";
-type ExternalDragResult = { effect: "copy" | "move" | "link" | "none" };
-type SelectionBox = { startX: number; startY: number; currentX: number; currentY: number };
-type DeleteRequest = { permanent: boolean; paths: string[]; names: string[] };
-type BatchRenameDraft = { find: string; replace: string; prefix: string; suffix: string; addNumbers: boolean; startNumber: number };
-type ExternalOpenTarget = { directory: string; selectedPath: string | null };
-type FolderIntegrationStatus = { enabled: boolean; command: string };
-
-const DEFAULT_LIST_VIEWPORT_HEIGHT = 510;
-const MAX_CACHED_THUMBNAILS = 96;
-const MAX_CACHED_FILE_ICONS = 320;
-const TEXT_PREVIEW_CHUNK = 128 * 1024;
-const SHOW_EXTENSIONS_KEY = "flow.showExtensions";
-const SHOW_HIDDEN_KEY = "flow.showHidden";
-const SORT_KEY = "flow.sortKey";
-const SORT_DIRECTION_KEY = "flow.sortDirection";
-const VIEW_MODE_KEY = "flow.viewMode";
-const LANGUAGE_KEY = "flow.language";
-const PREVIEW_PANE_KEY = "flow.previewPane";
-const SESSION_KEY = "flow.session";
-const UNDO_STACK_KEY = "flow.undoStack";
-const OPERATION_TASKS_KEY = "flow.operationTasks";
-const FAVORITES_KEY = "flow.favorites";
-const FAVORITE_COLLAPSE_KEY = "flow.favoriteCollapsedGroups";
-const RECENT_PATHS_KEY = "flow.recentPaths";
-const SEARCH_HISTORY_KEY = "flow.searchHistory";
-const SAVED_SEARCHES_KEY = "flow.savedSearches";
-const SEARCH_EVERYTHING_KEY = "flow.searchEverything";
-const COLUMN_WIDTHS_KEY = "flow.columnWidths";
-const CLAUDE_PROVIDER_KEY = "flow.claudeProvider";
-const CLAUDE_FULL_ACCESS_KEY = "flow.claudeFullAccess";
-const SPACE_SCAN_SNAPSHOTS_KEY = "flow.spaceScanSnapshots.v1";
-const DEFAULT_COLUMN_WIDTHS: ColumnWidths = { modified: 178, type: 140, size: 84 };
-const MAX_UNDO_STEPS = 20;
-const UNDO_RETENTION_MS = 30 * 60 * 1000;
+import {
+  CLAUDE_FULL_ACCESS_KEY, CLAUDE_PROVIDER_KEY, COLUMN_WIDTHS_KEY, DEFAULT_COLUMN_WIDTHS,
+  DEFAULT_LIST_VIEWPORT_HEIGHT, FAVORITES_KEY, FAVORITE_COLLAPSE_KEY, LANGUAGE_KEY,
+  MAX_CACHED_FILE_ICONS, MAX_CACHED_THUMBNAILS, MAX_UNDO_STEPS, OPERATION_TASKS_KEY,
+  PREVIEW_PANE_KEY, RECENT_PATHS_KEY, SAVED_SEARCHES_KEY, SEARCH_EVERYTHING_KEY,
+  SEARCH_HISTORY_KEY, SESSION_KEY, SHOW_EXTENSIONS_KEY, SHOW_HIDDEN_KEY, SORT_DIRECTION_KEY,
+  SORT_KEY, SPACE_SCAN_SNAPSHOTS_KEY, UNDO_RETENTION_MS, UNDO_STACK_KEY,
+  VIEW_MODE_KEY,
+} from "./constants";
+import type {
+  BatchRenameDraft, ClaudeCredentialStatus, ClaudeDiagnostic, ClaudeProvider, ClipboardPayload,
+  ClipboardState, ColumnWidths, ConflictChoice, ConflictEntry, ConflictResolution, DeleteRequest,
+  DirectoryChanged, DirectoryListing, DirectoryLoadProgress, DirectoryStatus, DragGhost,
+  DuplicateGroup, DuplicateScanProgress, DuplicateScanResult, DuplicateSizeFilter,
+  DuplicateTypeFilter, EverythingStatus, ExternalDragResult, ExternalOpenTarget,
+  FavoriteItem, FileEntry, FileOperationResult, FilePreview, FolderIntegrationStatus,
+  FolderSizeProgress, FolderSizeResult, FolderSizeState, FolderTab, Location, OperationIssue,
+  OperationScanProgress, PathSuggestion, PendingTransfer, ResizableColumn, RetryTransfer,
+  RunningOperation, SavedSearch, SearchDate, SearchHistoryItem, SearchKind, SearchProgress,
+  SearchProfile, SearchProvider, SearchResult, SearchSize, SelectionBox, SortDirection, SortKey,
+  SpaceCategoryAdvice, SpaceScanCategory,
+  SpaceCleanupAge, SpaceCleanupPreview, SpaceScanItem, SpaceScanProgress, SpaceScanResult,
+  SpaceScanSnapshot, Thumbnail, TransferTask, UiLanguage, UndoAction,
+  UndoRecord, ViewMode,
+} from "./types";
+import {
+  batchNameFor, directoryKindForPath, displayName, iconKindFor, isThumbnailCandidate,
+  joinWindowsPath, labelForPath, localizedLocation, nativeDropMode, pathCrumbs,
+  sortEntriesForView, typeLabelFor,
+} from "./lib/file-utils";
+import {
+  readCollapsedFavoriteGroups, readSpaceScanSnapshots, readStoredFavorites,
+  readStoredOperationTasks, readStoredRecentPaths, readStoredSavedSearches,
+  readStoredSearchHistory, readStoredSession, readStoredUndoStack, snapshotForSpaceScan,
+} from "./lib/storage";
+import {
+  ActionsIcon, ChevronIcon, EntryIcon, FolderGlyph, SettingsIcon, SortIcon, SpaceHealthIcon,
+  ViewIcon,
+} from "./components/Icons";
+import { formatDate, formatDuration, formatSize } from "./lib/format";
+import { PreviewContent } from "./components/PreviewContent";
 
 const UI_COPY = {
   "zh-CN": {
@@ -143,203 +82,6 @@ const UI_COPY = {
     spaceHealth: "Space check", spaceHealthTitle: "Disk space check", spaceHealthIntro: "Read-only scan that explains disk usage. No file is changed or deleted from this page.", startScan: "Start scan", rescan: "Scan again", stopScan: "Stop scan", scanningSpace: "Scanning disk space…", scanCaptured: "Files measured", inaccessible: "Unreadable", largeDirectories: "Large folders", largeFilesTitle: "Large files", attentionItems: "Worth reviewing", openLocation: "Open location", noScanYet: "Choose a drive and start a scan. Closing this window stops the scan.", scanCoverageHint: "Sizes are logical bytes from readable files. Protected paths, cloud placeholders, and directory junctions are not forced open.", safeToReview: "Safe to review", confirmBeforeAction: "Confirm first", protectedItem: "Information only",
   },
 } as const;
-
-function readStoredFavorites() {
-  try {
-    const value = JSON.parse(localStorage.getItem(FAVORITES_KEY) ?? "[]");
-    if (!Array.isArray(value)) return [];
-    const items = value.flatMap((item): FavoriteItem[] => {
-      if (typeof item === "string" && item.length > 0) return [{ path: item, label: null, group: null }];
-      if (item && typeof item === "object" && "path" in item && typeof item.path === "string" && item.path.length > 0) {
-        return [{ path: item.path, label: "label" in item && typeof item.label === "string" && item.label.trim() ? item.label.trim() : null, group: "group" in item && typeof item.group === "string" && item.group.trim() ? item.group.trim() : null }];
-      }
-      return [];
-    });
-    return items.filter((item, index) => items.findIndex((candidate) => candidate.path.toLocaleLowerCase() === item.path.toLocaleLowerCase()) === index);
-  } catch {
-    return [];
-  }
-}
-
-function readCollapsedFavoriteGroups() {
-  try {
-    const value = JSON.parse(localStorage.getItem(FAVORITE_COLLAPSE_KEY) ?? "[]");
-    return new Set(Array.isArray(value) ? value.filter((group): group is string => typeof group === "string") : []);
-  } catch {
-    return new Set<string>();
-  }
-}
-
-function readSpaceScanSnapshots(): Record<string, SpaceScanSnapshot> {
-  try {
-    const value = JSON.parse(localStorage.getItem(SPACE_SCAN_SNAPSHOTS_KEY) ?? "{}");
-    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
-    return value as Record<string, SpaceScanSnapshot>;
-  } catch {
-    return {};
-  }
-}
-
-function snapshotForSpaceScan(result: SpaceScanResult): SpaceScanSnapshot {
-  return {
-    root: result.root,
-    capturedAt: Date.now(),
-    totalSpace: result.totalSpace,
-    availableSpace: result.availableSpace,
-    scannedBytes: result.scannedBytes,
-    categories: Object.fromEntries(result.categories.map((category) => [category.id, category.size])),
-  };
-}
-
-function readStoredRecentPaths() {
-  try {
-    const value = JSON.parse(localStorage.getItem(RECENT_PATHS_KEY) ?? "[]");
-    return Array.isArray(value) ? [...new Set(value.filter((path): path is string => typeof path === "string" && path.length > 0))].slice(0, 20) : [];
-  } catch {
-    return [];
-  }
-}
-
-function readSearchProfile(value: unknown): SearchProfile | null {
-  if (!value || typeof value !== "object") return null;
-  const candidate = value as Partial<SearchProfile>;
-  const kinds: SearchKind[] = ["all", "folders", "images", "documents", "videos", "audio", "archives"];
-  const dates: SearchDate[] = ["any", "day", "week", "month", "year"];
-  const sizes: SearchSize[] = ["any", "small", "medium", "large"];
-  if (typeof candidate.query !== "string" || !kinds.includes(candidate.kind as SearchKind) || !dates.includes(candidate.date as SearchDate) || !sizes.includes(candidate.size as SearchSize)) return null;
-  return { query: candidate.query.slice(0, 240), kind: candidate.kind as SearchKind, date: candidate.date as SearchDate, size: candidate.size as SearchSize };
-}
-
-function readStoredSearchHistory(): SearchHistoryItem[] {
-  try {
-    const value = JSON.parse(localStorage.getItem(SEARCH_HISTORY_KEY) ?? "[]");
-    if (!Array.isArray(value)) return [];
-    return value.flatMap((item): SearchHistoryItem[] => {
-      const profile = readSearchProfile(item);
-      const usedAt = item && typeof item === "object" && "usedAt" in item && typeof item.usedAt === "number" ? item.usedAt : 0;
-      return profile ? [{ ...profile, usedAt }] : [];
-    }).slice(0, 12);
-  } catch {
-    return [];
-  }
-}
-
-function readStoredSavedSearches(): SavedSearch[] {
-  try {
-    const value = JSON.parse(localStorage.getItem(SAVED_SEARCHES_KEY) ?? "[]");
-    if (!Array.isArray(value)) return [];
-    return value.flatMap((item): SavedSearch[] => {
-      const profile = readSearchProfile(item);
-      if (!profile || !item || typeof item !== "object") return [];
-      const candidate = item as Partial<SavedSearch>;
-      return typeof candidate.id === "string" && typeof candidate.name === "string" ? [{ ...profile, id: candidate.id, name: candidate.name.slice(0, 120) }] : [];
-    }).slice(0, 20);
-  } catch {
-    return [];
-  }
-}
-
-function readStoredUndoStack(): UndoRecord[] {
-  try {
-    const value = JSON.parse(localStorage.getItem(UNDO_STACK_KEY) ?? "[]");
-    if (!Array.isArray(value)) return [];
-    const now = Date.now();
-    return value.flatMap((item): UndoRecord[] => {
-      if (!item || typeof item !== "object") return [];
-      const candidate = item as Partial<UndoRecord>;
-      if (typeof candidate.id !== "string" || typeof candidate.label !== "string" || typeof candidate.createdAt !== "number" || now - candidate.createdAt > UNDO_RETENTION_MS || !candidate.action || typeof candidate.action !== "object") return [];
-      const action = candidate.action as UndoAction;
-      if (action.kind === "deleteCreated" && Array.isArray(action.paths) && action.paths.every((path) => typeof path === "string")) return [{ id: candidate.id, label: candidate.label.slice(0, 160), createdAt: candidate.createdAt, action: { kind: action.kind, paths: action.paths } }];
-      if (action.kind === "restoreTrash" && Array.isArray(action.ids) && action.ids.every((id) => typeof id === "string")) return [{ id: candidate.id, label: candidate.label.slice(0, 160), createdAt: candidate.createdAt, action: { kind: action.kind, ids: action.ids } }];
-      if (action.kind === "move" && Array.isArray(action.pairs) && action.pairs.every((pair) => pair && typeof pair.from === "string" && typeof pair.to === "string")) return [{ id: candidate.id, label: candidate.label.slice(0, 160), createdAt: candidate.createdAt, action: { kind: action.kind, pairs: action.pairs } }];
-      return [];
-    }).slice(-MAX_UNDO_STEPS);
-  } catch {
-    return [];
-  }
-}
-
-function readStoredOperationTasks(): TransferTask[] {
-  try {
-    const value = JSON.parse(localStorage.getItem(OPERATION_TASKS_KEY) ?? "[]");
-    if (!Array.isArray(value)) return [];
-    const statuses: TransferTaskStatus[] = ["queued", "running", "paused", "completed", "cancelled", "failed"];
-    return value.flatMap((item): TransferTask[] => {
-      if (!item || typeof item !== "object") return [];
-      const candidate = item as Partial<TransferTask>;
-      if (typeof candidate.jobId !== "string" || (candidate.mode !== "copy" && candidate.mode !== "move") || !Array.isArray(candidate.sourcePaths) || !candidate.sourcePaths.every((path) => typeof path === "string") || typeof candidate.destination !== "string" || !statuses.includes(candidate.status as TransferTaskStatus)) return [];
-      const interrupted = candidate.status === "queued" || candidate.status === "running" || candidate.status === "paused";
-      return [{
-        jobId: candidate.jobId, mode: candidate.mode, sourcePaths: candidate.sourcePaths, destination: candidate.destination,
-        conflict: candidate.conflict === "replace" || candidate.conflict === "keepBoth" ? candidate.conflict : "skip",
-        conflictResolutions: Array.isArray(candidate.conflictResolutions) ? candidate.conflictResolutions.filter((resolution): resolution is ConflictResolution => !!resolution && typeof resolution.source === "string" && ["replace", "skip", "keepBoth"].includes(resolution.action)) : [],
-        status: interrupted ? "failed" : candidate.status as TransferTaskStatus,
-        queuedAt: typeof candidate.queuedAt === "number" ? candidate.queuedAt : Date.now(), startedAt: typeof candidate.startedAt === "number" ? candidate.startedAt : Date.now(), finishedAt: interrupted ? Date.now() : typeof candidate.finishedAt === "number" ? candidate.finishedAt : null,
-        paused: false, processedBytes: typeof candidate.processedBytes === "number" ? candidate.processedBytes : 0, totalBytes: typeof candidate.totalBytes === "number" ? candidate.totalBytes : 0,
-        completedItems: typeof candidate.completedItems === "number" ? candidate.completedItems : 0, totalItems: typeof candidate.totalItems === "number" ? candidate.totalItems : candidate.sourcePaths.length,
-        currentName: typeof candidate.currentName === "string" ? candidate.currentName : "", phase: candidate.phase === "transfer" ? "transfer" : "scanning",
-        scannedItems: typeof candidate.scannedItems === "number" ? candidate.scannedItems : 0, scannedBytes: typeof candidate.scannedBytes === "number" ? candidate.scannedBytes : 0, speed: 0,
-        issues: Array.isArray(candidate.issues) ? candidate.issues : [], error: interrupted ? "Flow Files closed before this task completed." : typeof candidate.error === "string" ? candidate.error.slice(0, 1000) : null,
-      }];
-    }).slice(-20);
-  } catch {
-    return [];
-  }
-}
-
-function readStoredSession(): { tabs: FolderTab[]; activeTabId: number } | null {
-  try {
-    const value = JSON.parse(localStorage.getItem(SESSION_KEY) ?? "null") as { tabs?: unknown[]; activeTabId?: unknown } | null;
-    if (!value || !Array.isArray(value.tabs) || value.tabs.length === 0) return null;
-    const rawTabs = value.tabs.filter((tab): tab is FolderTab => {
-      const candidate = tab as Partial<FolderTab>;
-      return typeof candidate.id === "number" && typeof candidate.path === "string" && Array.isArray(candidate.history);
-    }).slice(0, 12);
-    if (!rawTabs.length) return null;
-    const activeIndex = Math.max(0, rawTabs.findIndex((tab) => tab.id === value.activeTabId));
-    const seed = Date.now();
-    const tabs = rawTabs.map((tab, index) => {
-      const history = tab.history.filter((path): path is string => typeof path === "string" && path.length > 0).slice(-30);
-      const safeHistory = history.length ? history : [tab.path];
-      const storedViewMode: ViewMode = tab.viewMode === "compact" || tab.viewMode === "grid" ? tab.viewMode : "comfortable";
-      const storedSelection = Array.isArray(tab.selectedPaths) ? tab.selectedPaths.filter((path): path is string => typeof path === "string").slice(0, 500) : [];
-      return { ...tab, id: seed + index, label: typeof tab.label === "string" ? tab.label : labelForPath(tab.path), pinned: !!tab.pinned, history: safeHistory, historyIndex: Math.max(0, Math.min(Number(tab.historyIndex) || 0, safeHistory.length - 1)), scrollTop: Math.max(0, Number(tab.scrollTop) || 0), viewMode: storedViewMode, selectedPaths: storedSelection };
-    });
-    return { tabs, activeTabId: tabs[activeIndex]?.id ?? tabs[0].id };
-  } catch {
-    return null;
-  }
-}
-
-function labelForPath(path: string) {
-  const normalized = path.replace(/[\\/]+$/, "");
-  return normalized.split(/[\\/]/).pop() || path;
-}
-
-function volumeKey(path: string) {
-  const drive = path.match(/^([A-Za-z]:)[\\/]/);
-  if (drive) return drive[1].toLowerCase();
-  const network = path.match(/^\\\\([^\\]+)\\([^\\]+)/);
-  return network ? `\\\\${network[1].toLowerCase()}\\${network[2].toLowerCase()}` : "";
-}
-
-function directoryKindForPath(path: string): DirectoryStatus["kind"] {
-  return path.startsWith("\\\\") ? "network" : /^[A-Za-z]:/.test(path) ? "drive" : "folder";
-}
-
-function nativeDropMode(paths: string[], destination: string): "copy" | "move" {
-  const destinationVolume = volumeKey(destination);
-  return destinationVolume && paths.every((path) => volumeKey(path) === destinationVolume) ? "move" : "copy";
-}
-
-function formatSize(bytes: number) {
-  if (bytes < 1024) return `${bytes} B`;
-  const units = ["KB", "MB", "GB", "TB"];
-  let value = bytes / 1024;
-  let unit = 0;
-  while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit += 1; }
-  return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[unit]}`;
-}
 
 function suggestedDuplicateKeep(group: DuplicateGroup) {
   if (!group.files.length) return null;
@@ -396,20 +138,6 @@ function unavailableLocationCopy(status: DirectoryStatus, language: UiLanguage) 
   return { title: status.kind === "network" ? "Network location unavailable" : "Drive or folder disconnected", detail: "The current view is preserved. Flow Files retries every 8 seconds." };
 }
 
-function formatDuration(seconds: number) {
-  if (!Number.isFinite(seconds) || seconds < 0) return "—";
-  const rounded = Math.max(0, Math.round(seconds));
-  if (rounded < 60) return `${rounded}s`;
-  const minutes = Math.floor(rounded / 60);
-  const remainder = rounded % 60;
-  return minutes < 60 ? `${minutes}m ${remainder}s` : `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
-}
-
-function formatDate(seconds: number | null, language: UiLanguage) {
-  if (!seconds) return "—";
-  return new Intl.DateTimeFormat(language, { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(seconds * 1000));
-}
-
 function operationIssueLabel(code: OperationIssue["code"], language: UiLanguage) {
   const labels = language === "zh-CN"
     ? { accessDenied: "没有访问权限", inUse: "文件正在被其他程序使用", diskFull: "磁盘空间不足", pathTooLong: "路径过长", network: "网络位置不可用", notFound: "文件已不存在", other: "文件系统错误" }
@@ -458,75 +186,6 @@ function spaceCategoryAdvice(id: string, language: UiLanguage): SpaceCategoryAdv
   return (language === "zh-CN" ? zh : en)[id] ?? { summary: language === "zh-CN" ? "请先查看文件来源和用途。" : "Review the source and purpose first.", action: language === "zh-CN" ? "仅处理你确认不再需要的内容。" : "Only handle items you no longer need.", caution: language === "zh-CN" ? "不会自动选择或删除。" : "Nothing is selected or deleted automatically.", cleanable: false };
 }
 
-function displayName(entry: FileEntry, showExtensions: boolean) {
-  if (entry.isDirectory || showExtensions) return entry.name;
-  const extensionStart = entry.name.lastIndexOf(".");
-  return extensionStart > 0 ? entry.name.slice(0, extensionStart) : entry.name;
-}
-
-function joinWindowsPath(parent: string, name: string) {
-  return `${parent.replace(/[\\/]+$/, "")}\\${name}`;
-}
-
-function batchNameFor(entry: FileEntry, draft: BatchRenameDraft, index: number, total: number) {
-  const dot = entry.isDirectory ? -1 : entry.name.lastIndexOf(".");
-  const stem = dot > 0 ? entry.name.slice(0, dot) : entry.name;
-  const extension = dot > 0 ? entry.name.slice(dot) : "";
-  const replaced = draft.find ? stem.split(draft.find).join(draft.replace) : stem;
-  const digits = Math.max(2, String(Math.max(draft.startNumber, draft.startNumber + total - 1)).length);
-  const number = draft.addNumbers ? `${String(draft.startNumber + index).padStart(digits, "0")} ` : "";
-  return `${draft.prefix}${number}${replaced}${draft.suffix}${extension}`;
-}
-
-type EntryIconKind = "folder" | "image" | "video" | "audio" | "archive" | "code" | "pdf" | "app" | "document" | "file";
-
-function iconKindFor(entry: FileEntry): EntryIconKind {
-  if (entry.isDirectory) return "folder";
-  const extension = entry.extension?.toLowerCase() ?? "";
-  if (["png", "jpg", "jpeg", "webp", "gif", "heic", "bmp", "svg"].includes(extension)) return "image";
-  if (["mp4", "mkv", "mov", "avi", "webm"].includes(extension)) return "video";
-  if (["mp3", "wav", "flac", "aac", "m4a", "ogg"].includes(extension)) return "audio";
-  if (["zip", "rar", "7z", "tar", "gz"].includes(extension)) return "archive";
-  if (["js", "jsx", "ts", "tsx", "rs", "cs", "py", "java", "cpp", "c", "h", "html", "css", "json", "xml", "yaml", "yml", "toml", "md"].includes(extension)) return "code";
-  if (extension === "pdf") return "pdf";
-  if (["exe", "msi", "bat", "cmd", "ps1"].includes(extension)) return "app";
-  if (["txt", "doc", "docx", "rtf", "odt", "xls", "xlsx", "ppt", "pptx", "csv"].includes(extension)) return "document";
-  return "file";
-}
-
-function typeLabelFor(entry: FileEntry, language: UiLanguage) {
-  if (entry.isDirectory) return language === "zh-CN" ? "文件夹" : "Folder";
-  const extension = entry.extension?.toLowerCase() ?? "";
-  const exactLabels: Record<string, string> = language === "zh-CN" ? {
-    pdf: "PDF 文档", txt: "文本文档", md: "Markdown 文档", doc: "Word 文档", docx: "Word 文档", xls: "Excel 工作簿", xlsx: "Excel 工作簿",
-    ppt: "PowerPoint 演示文稿", pptx: "PowerPoint 演示文稿", csv: "CSV 文档", exe: "应用程序", msi: "安装程序", bat: "批处理脚本",
-    cmd: "命令脚本", ps1: "PowerShell 脚本", zip: "ZIP 压缩文件", rar: "RAR 压缩文件", "7z": "7-Zip 压缩文件", tar: "TAR 压缩文件", gz: "GZip 压缩文件",
-  } : {
-    pdf: "PDF document", txt: "Text document", md: "Markdown document", doc: "Word document", docx: "Word document", xls: "Excel workbook", xlsx: "Excel workbook",
-    ppt: "PowerPoint", pptx: "PowerPoint", csv: "CSV document", exe: "Application", msi: "Installer", bat: "Batch script", cmd: "Command script",
-    ps1: "PowerShell script", zip: "ZIP archive", rar: "RAR archive", "7z": "7-Zip archive", tar: "TAR archive", gz: "GZip archive",
-  };
-  if (exactLabels[extension]) return exactLabels[extension];
-  const kind = iconKindFor(entry);
-  const categoryLabels: Partial<Record<EntryIconKind, string>> = language === "zh-CN"
-    ? { image: "图像", video: "视频", audio: "音频", code: "源代码文件", document: "文档" }
-    : { image: "Image", video: "Video", audio: "Audio", code: "Source file", document: "Document" };
-  if (categoryLabels[kind]) return extension ? `${extension.toUpperCase()} ${categoryLabels[kind]}` : categoryLabels[kind]!;
-  return extension ? `${extension.toUpperCase()} ${language === "zh-CN" ? "文件" : "file"}` : language === "zh-CN" ? "文件" : "File";
-}
-
-function sortEntriesForView(entries: FileEntry[], sortKey: SortKey, sortDirection: SortDirection, language: UiLanguage) {
-  return [...entries].sort((left, right) => {
-    if (left.isDirectory !== right.isDirectory) return left.isDirectory ? -1 : 1;
-    let comparison = 0;
-    if (sortKey === "modified") comparison = (left.modifiedUnixSeconds ?? 0) - (right.modifiedUnixSeconds ?? 0);
-    else if (sortKey === "type") comparison = typeLabelFor(left, language).localeCompare(typeLabelFor(right, language), language, { numeric: true, sensitivity: "base" });
-    else if (sortKey === "size") comparison = left.size - right.size;
-    else comparison = left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: "base" });
-    return sortDirection === "ascending" ? comparison : -comparison;
-  });
-}
-
 function readStoredSortKey(): SortKey {
   const stored = localStorage.getItem(SORT_KEY);
   return stored === "modified" || stored === "type" || stored === "size" ? stored : "name";
@@ -548,139 +207,6 @@ function readStoredColumnWidths(): ColumnWidths {
   } catch {
     return DEFAULT_COLUMN_WIDTHS;
   }
-}
-
-function pathCrumbs(path: string) {
-  const normalized = path.replace(/[\\/]+$/, "");
-  const parts = normalized.split(/[\\/]+/).filter(Boolean);
-  if (parts.length === 0) return [];
-  if (normalized.startsWith("\\\\") && parts.length >= 2) {
-    const root = `\\\\${parts[0]}\\${parts[1]}`;
-    return [{ label: root, path: root }, ...parts.slice(2).map((label, index) => ({ label, path: `${root}\\${parts.slice(2, index + 3).join("\\")}` }))];
-  }
-  return parts.map((label, index) => ({
-    label: index === 0 && /^[A-Za-z]:$/.test(label) ? `${label}\\` : label,
-    path: index === 0 && /^[A-Za-z]:$/.test(label) ? `${label}\\` : parts.slice(0, index + 1).join("\\"),
-  }));
-}
-
-function localizedLocation(label: string, language: UiLanguage) {
-  if (language !== "zh-CN") return label;
-  return ({ Home: "主页", Desktop: "桌面", Documents: "文档", Downloads: "下载", Pictures: "图片" } as Record<string, string>)[label] ?? label;
-}
-
-function EntryIcon({ entry }: { entry: FileEntry }) {
-  const kind = iconKindFor(entry);
-  const common = { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.7, strokeLinecap: "round" as const, strokeLinejoin: "round" as const, "aria-hidden": true };
-  if (kind === "folder") return <svg {...common}><path className="icon-fill" d="M3.5 6.8c0-1 .8-1.8 1.8-1.8h4l2 2h7.4c1 0 1.8.8 1.8 1.8v8.4c0 1-.8 1.8-1.8 1.8H5.3c-1 0-1.8-.8-1.8-1.8V6.8Z" /><path d="M3.8 8.5h16.4" /></svg>;
-  if (kind === "image") return <svg {...common}><rect x="3.5" y="4" width="17" height="16" rx="2.4" /><circle cx="8.5" cy="9" r="1.4" /><path d="m5.5 17 4.1-4 2.8 2.5 2.1-2 4 3.5" /></svg>;
-  if (kind === "video") return <svg {...common}><rect x="3.5" y="5" width="17" height="14" rx="2.4" /><path className="icon-fill" d="m10 9 5 3-5 3V9Z" /></svg>;
-  if (kind === "audio") return <svg {...common}><path d="M9.5 17.2V6.8L18 5v9.9" /><circle className="icon-fill" cx="6.8" cy="17.2" r="2.7" /><circle className="icon-fill" cx="15.3" cy="14.9" r="2.7" /></svg>;
-  if (kind === "archive") return <svg {...common}><path d="M7 3.8h8l3 3V20H7V3.8Z" /><path d="M10.5 4v2m0 2v2m0 2v2m0 2v2" /><path d="M15 4v3h3" /></svg>;
-  if (kind === "code") return <svg {...common}><path d="M7 3.8h8l3 3V20H7V3.8Z" /><path d="M15 4v3h3M11 11l-2 2 2 2m3-4 2 2-2 2" /></svg>;
-  if (kind === "pdf") return <svg {...common}><path className="icon-fill" d="M7 3.8h8l3 3V20H7V3.8Z" /><path d="M15 4v3h3M9.3 14.8h5.4M9.3 11.8h5.4" /></svg>;
-  if (kind === "app") return <svg {...common}><rect x="3.5" y="3.5" width="17" height="17" rx="3" /><path d="M8 8h3v3H8V8Zm5 0h3v3h-3V8Zm-5 5h3v3H8v-3Zm5 0h3v3h-3v-3Z" /></svg>;
-  if (kind === "document") return <svg {...common}><path d="M7 3.8h8l3 3V20H7V3.8Z" /><path d="M15 4v3h3M9.5 11h5m-5 3h5m-5 3H13" /></svg>;
-  return <svg {...common}><path d="M7 3.8h8l3 3V20H7V3.8Z" /><path d="M15 4v3h3" /></svg>;
-}
-
-function ChevronIcon() {
-  return <svg className="chevron-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 6 3.5 3.5L11.5 6" /></svg>;
-}
-
-function SortIcon() {
-  return <svg className="toolbar-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M6 3v14m0 0-3-3m3 3 3-3M14 17V3m0 0-3 3m3-3 3 3" /></svg>;
-}
-
-function ViewIcon() {
-  return <svg className="toolbar-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5h2m3 0h9M3 10h2m3 0h9M3 15h2m3 0h9" /></svg>;
-}
-
-function ActionsIcon() {
-  return <svg className="toolbar-icon" viewBox="0 0 20 20" aria-hidden="true"><circle cx="4" cy="10" r="1" /><circle cx="10" cy="10" r="1" /><circle cx="16" cy="10" r="1" /></svg>;
-}
-
-function SettingsIcon() {
-  return <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="2.5" /><path d="M10 2.5v2m0 11v2M2.5 10h2m11 0h2M4.7 4.7l1.4 1.4m7.8 7.8 1.4 1.4m0-10.6-1.4 1.4m-7.8 7.8-1.4 1.4" /></svg>;
-}
-
-function SpaceHealthIcon() {
-  return <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 15.5V10m4.3 5.5V6.8m4.4 8.7V9m4.3 6.5V4.5" /><path d="M2.8 17.2h14.4" /></svg>;
-}
-
-function FolderGlyph() {
-  return <svg className="tree-folder-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M2.8 5.8c0-.9.7-1.6 1.6-1.6h3.4l1.8 1.9h6c.9 0 1.6.7 1.6 1.6v6.5c0 .9-.7 1.6-1.6 1.6H4.4c-.9 0-1.6-.7-1.6-1.6V5.8Z" /><path d="M3.1 7.4h13.8" /></svg>;
-}
-
-function isThumbnailCandidate(entry: FileEntry) {
-  return !entry.isDirectory && ["jpg", "jpeg", "png", "webp", "gif", "bmp"].includes(entry.extension?.toLowerCase() ?? "");
-}
-
-function detailLabel(key: string, language: UiLanguage) {
-  const labels: Record<string, [string, string]> = {
-    dimensions: ["尺寸", "Dimensions"], camera: ["相机", "Camera"], lens: ["镜头", "Lens"], captured: ["拍摄时间", "Captured"], aperture: ["光圈", "Aperture"], exposure: ["曝光时间", "Exposure"], iso: ["ISO", "ISO"], focalLength: ["焦距", "Focal length"],
-    title: ["标题", "Title"], artist: ["歌手", "Artist"], album: ["专辑", "Album"], genre: ["流派", "Genre"], year: ["年份", "Year"], track: ["音轨", "Track"], bitrate: ["比特率", "Bitrate"], sampleRate: ["采样率", "Sample rate"], bitDepth: ["位深", "Bit depth"], channels: ["声道数", "Channels"],
-  };
-  return labels[key]?.[language === "zh-CN" ? 0 : 1] ?? key;
-}
-
-function PreviewContent({ entry, preview, loading, language, onOpen, onTextPage }: { entry: FileEntry; preview: FilePreview | null; loading: boolean; language: UiLanguage; onOpen: () => void; onTextPage: (encoding: string, offset: number) => void }) {
-  const text = UI_COPY[language];
-  const sourceUrl = !entry.isDirectory ? convertFileSrc(entry.path) : "";
-  const [pdfPage, setPdfPage] = useState(1);
-  const [pdfZoom, setPdfZoom] = useState(100);
-  const [mediaInfo, setMediaInfo] = useState<{ duration: number; width: number; height: number } | null>(null);
-  const [detailsOpen, setDetailsOpen] = useState(false);
-  const [details, setDetails] = useState<FileDetails | null>(null);
-  const [detailsLoading, setDetailsLoading] = useState(false);
-  useEffect(() => {
-    setPdfPage(1);
-    setPdfZoom(100);
-    setMediaInfo(null);
-    setDetailsOpen(false);
-    setDetails(null);
-    setDetailsLoading(false);
-  }, [entry.path]);
-  const textPage = preview?.kind === "text" ? Math.floor(preview.textOffset / TEXT_PREVIEW_CHUNK) + 1 : 1;
-  const textPages = preview?.kind === "text" ? Math.max(1, Math.ceil(preview.totalBytes / TEXT_PREVIEW_CHUNK)) : 1;
-  const pdfUrl = `${sourceUrl}#page=${pdfPage}&zoom=${pdfZoom}`;
-  const detailsSupported = ["image", "svg", "heic", "audio"].includes(preview?.kind ?? "");
-  async function toggleDetails() {
-    const nextOpen = !detailsOpen;
-    setDetailsOpen(nextOpen);
-    if (!nextOpen || details || detailsLoading) return;
-    setDetailsLoading(true);
-    try {
-      setDetails(await invoke<FileDetails>("load_file_details", { path: entry.path }));
-    } catch {
-      setDetails({ items: [] });
-    } finally {
-      setDetailsLoading(false);
-    }
-  }
-  const media = loading ? <span className="preview-spinner" />
-    : preview?.kind === "image" && preview.dataUrl ? <img src={preview.dataUrl} alt="" />
-      : (preview?.kind === "svg" || preview?.kind === "heic") ? <img src={sourceUrl} alt="" />
-        : preview?.kind === "pdf" ? <div className="pdf-preview-shell"><div className="preview-toolstrip"><button disabled={pdfPage <= 1} onClick={() => setPdfPage((page) => Math.max(1, page - 1))}>‹</button><label>{language === "zh-CN" ? "第" : "Page"}<input type="number" min="1" value={pdfPage} onChange={(event) => setPdfPage(Math.max(1, Number(event.target.value) || 1))} />{language === "zh-CN" ? "页" : ""}</label><button onClick={() => setPdfPage((page) => page + 1)}>›</button><span /><button disabled={pdfZoom <= 50} onClick={() => setPdfZoom((zoom) => Math.max(50, zoom - 25))}>−</button><b>{pdfZoom}%</b><button disabled={pdfZoom >= 200} onClick={() => setPdfZoom((zoom) => Math.min(200, zoom + 25))}>＋</button></div><iframe key={pdfUrl} src={pdfUrl} title={entry.name} /></div>
-          : preview?.kind === "video" ? <video src={sourceUrl} controls preload="metadata" onLoadedMetadata={(event) => setMediaInfo({ duration: event.currentTarget.duration, width: event.currentTarget.videoWidth, height: event.currentTarget.videoHeight })} />
-            : preview?.kind === "audio" ? <audio src={sourceUrl} controls preload="metadata" onLoadedMetadata={(event) => setMediaInfo({ duration: event.currentTarget.duration, width: 0, height: 0 })} />
-              : preview?.kind === "text" ? <div className="text-preview-shell"><div className="preview-toolstrip"><select aria-label={language === "zh-CN" ? "文本编码" : "Text encoding"} value={preview.encoding ?? "utf-8"} onChange={(event) => onTextPage(event.target.value, 0)}><option value="utf-8">UTF-8</option><option value="gbk">GBK / GB18030</option><option value="big5">Big5</option><option value="windows-1252">Windows-1252</option><option value="utf-16le">UTF-16 LE</option><option value="utf-16be">UTF-16 BE</option></select><span /><button disabled={preview.textOffset <= 0} onClick={() => onTextPage(preview.encoding ?? "utf-8", Math.max(0, preview.textOffset - TEXT_PREVIEW_CHUNK))}>‹</button><b>{textPage}/{textPages}</b><button disabled={!preview.truncated} onClick={() => onTextPage(preview.encoding ?? "utf-8", preview.textOffset + TEXT_PREVIEW_CHUNK)}>›</button></div><pre>{preview.text}</pre></div>
-                : <span className={`preview-generic entry-icon ${iconKindFor(entry)}-icon`}><EntryIcon entry={entry} /></span>;
-  return <div className="preview-content">
-    <div className={`preview-visual ${preview?.kind ?? "none"}`}>
-      {media}
-    </div>
-    <strong title={entry.name}>{entry.name}</strong>
-    <span>{entry.isDirectory ? text.folder : formatSize(entry.size)} · {formatDate(entry.modifiedUnixSeconds, language)}</span>
-    {mediaInfo && mediaInfo.width > 0 && <small className="media-info">{mediaInfo.width} × {mediaInfo.height}</small>}
-    {entry.isLink && entry.linkTarget && <small className="link-target" title={entry.linkTarget}>→ {entry.linkTarget}</small>}
-    {preview?.kind === "text" && textPages > 1 && <small>{language === "zh-CN" ? `分段显示，每段最多 128 KB · 第 ${textPage}/${textPages} 段` : `Shown in 128 KB chunks · Part ${textPage} of ${textPages}`}</small>}
-    {preview?.kind === "office" && <small>{text.officePreviewHint}</small>}
-    {preview?.kind === "heic" && <small>{text.codecUnavailable}</small>}
-    {preview?.kind === "none" && !entry.isDirectory && !loading && <small>{text.noPreview}</small>}
-    {detailsSupported && <section className={`preview-details ${detailsOpen ? "open" : ""}`}><button aria-expanded={detailsOpen} onClick={() => void toggleDetails()}><span>{language === "zh-CN" ? "详细信息" : "Details"}</span><i>›</i></button>{detailsOpen && <div className="preview-detail-list">{detailsLoading ? <span className="preview-spinner" /> : details?.items.length ? details.items.map((item) => <div key={item.key}><span>{detailLabel(item.key, language)}</span><strong title={item.value}>{item.value}</strong></div>) : <small>{language === "zh-CN" ? "没有可用的附加信息" : "No additional details available"}</small>}</div>}</section>}
-    <button onClick={onOpen}>{text.open}</button>
-  </div>;
 }
 
 function App() {
@@ -3692,7 +3218,7 @@ function App() {
           })}</div></div>
           {!isLoading && sortedEntries.length === 0 && <div className="empty-state">{query ? text.noMatches : text.empty}</div>}
           {selectionBox && <div className="selection-box" style={{ left: Math.min(selectionBox.startX, selectionBox.currentX), top: Math.min(selectionBox.startY, selectionBox.currentY), width: Math.max(1, Math.abs(selectionBox.currentX - selectionBox.startX)), height: Math.max(1, Math.abs(selectionBox.currentY - selectionBox.startY)) }} />}
-        </div>{previewPaneOpen && <aside className="preview-pane"><header><strong>{text.preview}</strong><button aria-label={text.close} onClick={togglePreviewPane}>×</button></header>{selected && selectedPaths.size === 1 ? <PreviewContent entry={selected} preview={preview} loading={previewLoading} language={language} onOpen={() => void openEntry(selected)} onTextPage={(encoding, offset) => void loadTextPreviewPage(encoding, offset)} /> : <div className="preview-placeholder"><ViewIcon /><span>{text.quickViewHint}</span></div>}</aside>}</div>
+        </div>{previewPaneOpen && <aside className="preview-pane"><header><strong>{text.preview}</strong><button aria-label={text.close} onClick={togglePreviewPane}>×</button></header>{selected && selectedPaths.size === 1 ? <PreviewContent entry={selected} preview={preview} loading={previewLoading} language={language} copy={text} onOpen={() => void openEntry(selected)} onTextPage={(encoding, offset) => void loadTextPreviewPage(encoding, offset)} /> : <div className="preview-placeholder"><ViewIcon /><span>{text.quickViewHint}</span></div>}</aside>}</div>
       </section>
     </section>
     <footer>{operation ? <div className="operation-status"><button className="operation-summary" onClick={() => setTaskCenterOpen(true)}><span>{operation.paused ? text.pause : operation.phase === "scanning" ? text.scanning : operation.mode === "copy" ? text.copying : text.moving} · {operation.currentName || (operation.phase === "scanning" ? operation.scannedItems : `${operation.completedItems}/${operation.totalItems}`)}</span></button><div className={`progress-track ${operation.phase === "scanning" ? "indeterminate" : ""}`}><i style={{ width: operation.phase === "scanning" ? "34%" : `${operation.totalBytes ? Math.min(100, operation.processedBytes / operation.totalBytes * 100) : 0}%` }} /></div><small>{operation.phase === "scanning" ? `${operation.scannedItems} ${text.scannedItems} · ${formatSize(operation.scannedBytes)}` : `${formatSize(operation.processedBytes)} / ${formatSize(operation.totalBytes)}${operation.speed > 0 && !operation.paused ? ` · ${formatSize(operation.speed)}/s · ${formatDuration((operation.totalBytes - operation.processedBytes) / operation.speed)}` : ""}`}</small><button onClick={() => void toggleOperationPaused()}>{operation.paused ? text.resume : text.pause}</button><button onClick={cancelOperation}>{text.cancel}</button></div> : searching ? <div className="search-operation-status"><span className="loading-dot">{text.searchAll}</span><span>{text.scanned} {searchProgress?.scanned ?? 0} · {searchProgress?.matches ?? 0} {text.matches}</span><small title={searchProgress?.currentPath}>{searchProgress?.currentPath}</small><button onClick={cancelDeepSearch}>{text.cancel}</button></div> : <><span className={isLoading ? "loading-dot" : ""}>{isLoading ? text.loading : text.ready}</span><span className="footer-message">{searchResults !== null && searchResultMeta ? `${searchResultMeta.provider === "everything" ? (language === "zh-CN" ? "Everything 索引" : "Everything index") : (language === "zh-CN" ? "本地扫描" : "Local scan")} · ${text.scanned} ${searchResultMeta.scanned}${searchResultMeta.truncated ? " · 20,000+" : searchResultMeta.cancelled ? ` · ${text.cancel}` : ""}` : status}</span>{latestUndo && <button className="footer-undo" disabled={undoBusy} title={`${latestUndo.label} · ${text.undoRetention}`} onClick={() => void undoLastOperation()}><span>{text.undo} · {latestUndo.label}</span><b>{undoStack.length}</b></button>}</>}<span className="item-count">{`${sortedEntries.length} ${text.shown}`}</span></footer>
@@ -3702,7 +3228,7 @@ function App() {
     {deleteRequest && <div className="settings-backdrop"><section className="settings-panel delete-panel" role="alertdialog" aria-modal="true" aria-labelledby="delete-title"><header><div><h2 id="delete-title">{deleteRequest.permanent ? text.permanentDeleteTitle : text.deleteTitle}</h2><p>{deleteRequest.permanent ? text.permanentWarning : text.deleteWarning}</p></div><button className="settings-close" aria-label={text.cancel} onClick={() => setDeleteRequest(null)}>×</button></header><div className="delete-list">{deleteRequest.names.slice(0, 5).map((name, index) => <span key={`${name}-${index}`} title={name}>{name}</span>)}{deleteRequest.names.length > 5 && <small>{language === "zh-CN" ? `另有 ${deleteRequest.names.length - 5} 个项目` : `${deleteRequest.names.length - 5} more item(s)`}</small>}</div><div className="conflict-actions"><button onClick={() => setDeleteRequest(null)}>{text.cancel}</button><button className={deleteRequest.permanent ? "danger-primary" : "primary"} onClick={() => void confirmDeleteRequest()}>{deleteRequest.permanent ? text.confirmPermanentDelete : text.confirmDelete}</button></div></section></div>}
     {batchRenameOpen && <div className="settings-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !archiveBusy) setBatchRenameOpen(false); }}><section className="settings-panel batch-rename-panel" role="dialog" aria-modal="true" aria-labelledby="batch-rename-title"><header><div><h2 id="batch-rename-title">{text.batchRenameTitle}</h2><p>{text.batchRenameIntro}</p></div><button className="settings-close" disabled={archiveBusy} aria-label={text.cancel} onClick={() => setBatchRenameOpen(false)}>×</button></header><div className="batch-rename-fields"><label><span>{text.findText}</span><input autoFocus value={batchRenameDraft.find} onChange={(event) => setBatchRenameDraft((draft) => ({ ...draft, find: event.target.value }))} /></label><label><span>{text.replaceWith}</span><input value={batchRenameDraft.replace} onChange={(event) => setBatchRenameDraft((draft) => ({ ...draft, replace: event.target.value }))} /></label><label><span>{text.prefix}</span><input value={batchRenameDraft.prefix} onChange={(event) => setBatchRenameDraft((draft) => ({ ...draft, prefix: event.target.value }))} /></label><label><span>{text.suffix}</span><input value={batchRenameDraft.suffix} onChange={(event) => setBatchRenameDraft((draft) => ({ ...draft, suffix: event.target.value }))} /></label><label className="numbering-field"><span>{text.addNumbers}</span><button className={`switch ${batchRenameDraft.addNumbers ? "on" : ""}`} role="switch" aria-checked={batchRenameDraft.addNumbers} onClick={() => setBatchRenameDraft((draft) => ({ ...draft, addNumbers: !draft.addNumbers }))}><span /></button></label><label><span>{text.startAt}</span><input type="number" min="0" max="999999" disabled={!batchRenameDraft.addNumbers} value={batchRenameDraft.startNumber} onChange={(event) => setBatchRenameDraft((draft) => ({ ...draft, startNumber: Math.max(0, Number(event.target.value) || 0) }))} /></label></div><div className="batch-preview"><strong>{text.previewChanges}</strong>{batchRenamePreview.slice(0, 12).map(({ entry, name }) => <div key={entry.path}><span title={entry.name}>{entry.name}</span><b>→</b><span title={name}>{name}</span></div>)}{batchRenamePreview.length > 12 && <small>{language === "zh-CN" ? `另有 ${batchRenamePreview.length - 12} 个项目` : `${batchRenamePreview.length - 12} more item(s)`}</small>}</div>{batchRenameError && <div className="batch-rename-error">{batchRenameError}</div>}<div className="conflict-actions"><button disabled={archiveBusy} onClick={() => setBatchRenameOpen(false)}>{text.cancel}</button><button className="primary" disabled={archiveBusy} onClick={() => void applyBatchRename()}>{archiveBusy ? text.loading : text.applyRename}</button></div></section></div>}
     {spaceHealthOpen && renderSpaceHealth()}
-    {quickPreviewOpen && selected && selectedPaths.size === 1 && <div className="quick-preview-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setQuickPreviewOpen(false); }}><section className="quick-preview" role="dialog" aria-modal="true" aria-label={text.preview}><button className="quick-preview-close" aria-label={text.close} onClick={() => setQuickPreviewOpen(false)}>×</button><PreviewContent entry={selected} preview={preview} loading={previewLoading} language={language} onOpen={() => { setQuickPreviewOpen(false); void openEntry(selected); }} onTextPage={(encoding, offset) => void loadTextPreviewPage(encoding, offset)} /></section></div>}
+    {quickPreviewOpen && selected && selectedPaths.size === 1 && <div className="quick-preview-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setQuickPreviewOpen(false); }}><section className="quick-preview" role="dialog" aria-modal="true" aria-label={text.preview}><button className="quick-preview-close" aria-label={text.close} onClick={() => setQuickPreviewOpen(false)}>×</button><PreviewContent entry={selected} preview={preview} loading={previewLoading} language={language} copy={text} onOpen={() => { setQuickPreviewOpen(false); void openEntry(selected); }} onTextPage={(encoding, offset) => void loadTextPreviewPage(encoding, offset)} /></section></div>}
     {settingsOpen && <div className="settings-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setSettingsOpen(false); }}>
       <section className="settings-panel" role="dialog" aria-modal="true" aria-labelledby="settings-title">
         <header><div><h2 id="settings-title">{text.settingsTitle}</h2><p>{text.settingsIntro}</p></div><button className="settings-close" aria-label={text.close} onClick={() => setSettingsOpen(false)}>×</button></header>

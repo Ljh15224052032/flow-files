@@ -26,6 +26,7 @@ Flow Files 是一款面向 Windows 的轻量文件管理器，使用 Tauri 2、R
 ```text
 file-manager-tech-lab/
 ├─ tauri-prototype/app/     # Flow Files 主应用
+│  └─ src/                  # 页面编排、组件、领域工具、类型与测试
 ├─ avalonia-prototype/      # 早期 Avalonia 技术对照原型
 ├─ tools/                   # 内存测量脚本
 ├─ RESULTS.md               # Tauri / Avalonia 初期测量记录
@@ -52,6 +53,7 @@ npm run tauri dev
 前端检查：
 
 ```powershell
+npm test
 npm run build
 ```
 

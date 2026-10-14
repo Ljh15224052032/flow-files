@@ -17,6 +17,8 @@
 ### Changed
 
 - 本机 Cargo 镜像配置不再进入仓库，GitHub CI 使用官方 crates.io。
+- 前端按领域拆分为类型、常量、持久化、文件路径工具、图标和预览组件，减少单文件修改造成的回归风险。
+- 新增 Vitest 前端单元测试并接入 GitHub CI，覆盖 Windows 路径、排序、批量命名和本地状态迁移。
 
 ### Planned
 

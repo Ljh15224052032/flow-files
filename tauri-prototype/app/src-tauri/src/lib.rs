@@ -5707,7 +5707,10 @@ mod tests {
         assert_eq!(security["freezePrototype"], Value::Bool(true));
         assert!(security["csp"].is_object(), "CSP must never be disabled");
         assert_eq!(security["csp"]["object-src"], "'none'");
-        assert_eq!(security["csp"]["frame-src"], "'none'");
+        assert_eq!(
+            security["csp"]["frame-src"],
+            "'self' asset: http://asset.localhost"
+        );
         assert_eq!(security["headers"]["X-Content-Type-Options"], "nosniff");
         let denied = security["assetProtocol"]["scope"]["deny"]
             .as_array()

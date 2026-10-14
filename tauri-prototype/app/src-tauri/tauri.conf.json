@@ -28,7 +28,7 @@
         "media-src": "'self' asset: http://asset.localhost blob:",
         "style-src": "'self' 'unsafe-inline'",
         "object-src": "'none'",
-        "frame-src": "'none'",
+        "frame-src": "'self' asset: http://asset.localhost",
         "base-uri": "'none'",
         "form-action": "'none'"
       },
