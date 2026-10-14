@@ -13,6 +13,14 @@ export function filterOperationTasks(tasks: TransferTask[], filter: TaskFilter) 
   return tasks.filter((task) => taskMatchesFilter(task, filter));
 }
 
+export function retryableTaskPaths(task: TransferTask) {
+  const issuePaths = task.issues.map((issue) => issue.path);
+  const candidates = issuePaths.length ? issuePaths : task.status === "failed" && task.error ? task.sourcePaths : [];
+  return candidates.filter(
+    (path, index, all) => all.findIndex((candidate) => candidate.toLocaleLowerCase() === path.toLocaleLowerCase()) === index,
+  );
+}
+
 export function prioritizeQueuedTask(tasks: TransferTask[], jobId: string) {
   const taskIndex = tasks.findIndex((task) => task.jobId === jobId && task.status === "queued");
   if (taskIndex < 0) return tasks;

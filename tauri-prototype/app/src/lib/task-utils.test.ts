@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { TransferTask } from "../types";
-import { filterOperationTasks, prioritizeQueuedTask } from "./task-utils";
+import { filterOperationTasks, prioritizeQueuedTask, retryableTaskPaths } from "./task-utils";
 
 function task(status: TransferTask["status"], recoveredFromRestart = false, issueCount = 0): TransferTask {
   return {
@@ -30,5 +30,12 @@ describe("task center filters", () => {
     const second = { ...task("queued"), jobId: "second" };
     expect(prioritizeQueuedTask([running, first, second], "second").map((item) => item.jobId)).toEqual([running.jobId, "second", "first"]);
     expect(prioritizeQueuedTask([running, first], running.jobId)).toEqual([running, first]);
+  });
+
+  it("deduplicates retry paths and falls back to failed source paths", () => {
+    const failed = { ...task("failed"), error: "stopped", sourcePaths: ["C:\\A", "c:\\a", "C:\\B"] };
+    expect(retryableTaskPaths(failed)).toEqual(["C:\\A", "C:\\B"]);
+    const withIssues = { ...failed, issues: [{ path: "D:\\locked.txt", code: "inUse" as const, message: "locked" }] };
+    expect(retryableTaskPaths(withIssues)).toEqual(["D:\\locked.txt"]);
   });
 });
