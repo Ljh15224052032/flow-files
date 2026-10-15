@@ -50,12 +50,14 @@ import { TaskCenter } from "./components/TaskCenter";
 import { ConflictDialog, DeleteConfirmationDialog, OperationIssuesDialog } from "./components/OperationDialogs";
 import { StatusBar } from "./components/StatusBar";
 import { SettingsDialog } from "./components/SettingsDialog";
+import { SearchPanel } from "./components/SearchPanel";
 import { UI_COPY } from "./localization";
 import { useAppUpdater } from "./hooks/useAppUpdater";
 import { prioritizeQueuedTask, retryableTaskPaths, type TaskFilter } from "./lib/task-utils";
 import { buildSpaceReport } from "./lib/space-report";
 import { duplicateFileMatchesType, duplicateKeepReason, spaceCategoryAdvice, spaceCategoryLabel, suggestedDuplicateKeep } from "./lib/space-utils";
 import { nextAvailabilityRetry, unavailableLocationCopy } from "./lib/network-utils";
+import { searchProfileLabel, searchProfilesMatch } from "./lib/search-utils";
 
 function readStoredSortKey(): SortKey {
   const stored = localStorage.getItem(SORT_KEY);
@@ -1030,22 +1032,6 @@ function App() {
     return { query: query.trim(), kind: searchKind, date: searchDate, size: searchSize };
   }
 
-  function searchProfilesMatch(first: SearchProfile, second: SearchProfile) {
-    return first.query.toLocaleLowerCase() === second.query.toLocaleLowerCase() && first.kind === second.kind && first.date === second.date && first.size === second.size;
-  }
-
-  function searchProfileLabel(profile: SearchProfile) {
-    const parts: string[] = [];
-    if (profile.query) parts.push(`“${profile.query}”`);
-    const kindLabels: Record<SearchKind, string> = { all: text.anyType, folders: text.foldersOnly, images: text.images, documents: text.documents, videos: text.videos, audio: text.audio, archives: text.archives };
-    const dateLabels: Record<SearchDate, string> = { any: text.anyDate, day: text.pastDay, week: text.pastWeek, month: text.pastMonth, year: text.pastYear };
-    const sizeLabels: Record<SearchSize, string> = { any: text.anySize, small: text.smallFiles, medium: text.mediumFiles, large: text.largeFiles };
-    if (profile.kind !== "all") parts.push(kindLabels[profile.kind]);
-    if (profile.date !== "any") parts.push(dateLabels[profile.date]);
-    if (profile.size !== "any") parts.push(sizeLabels[profile.size]);
-    return parts.join(" · ") || text.searchFilters;
-  }
-
   function rememberSearch(profile: SearchProfile) {
     const item: SearchHistoryItem = { ...profile, usedAt: Date.now() };
     setSearchHistory((current) => {
@@ -1060,7 +1046,7 @@ function App() {
     if (!profile.query && profile.kind === "all" && profile.date === "any" && profile.size === "any") return;
     setSavedSearches((current) => {
       const existing = current.find((candidate) => searchProfilesMatch(candidate, profile));
-      const item: SavedSearch = existing ? { ...existing, ...profile } : { ...profile, id: crypto.randomUUID(), name: searchProfileLabel(profile) };
+      const item: SavedSearch = existing ? { ...existing, ...profile } : { ...profile, id: crypto.randomUUID(), name: searchProfileLabel(profile, language) };
       const next = [item, ...current.filter((candidate) => candidate.id !== item.id)].slice(0, 20);
       localStorage.setItem(SAVED_SEARCHES_KEY, JSON.stringify(next));
       return next;
@@ -3053,16 +3039,22 @@ function App() {
   }
 
   function renderSearchPanel() {
-    const canSave = !!query.trim() || searchKind !== "all" || searchDate !== "any" || searchSize !== "any";
-    return <div className="search-panel">
-      <strong>{text.searchFilters}</strong>
-      <label><span>{text.type}</span><select value={searchKind} onChange={(event) => setSearchKind(event.target.value as SearchKind)}><option value="all">{text.anyType}</option><option value="folders">{text.foldersOnly}</option><option value="images">{text.images}</option><option value="documents">{text.documents}</option><option value="videos">{text.videos}</option><option value="audio">{text.audio}</option><option value="archives">{text.archives}</option></select></label>
-      <label><span>{text.modified}</span><select value={searchDate} onChange={(event) => setSearchDate(event.target.value as SearchDate)}><option value="any">{text.anyDate}</option><option value="day">{text.pastDay}</option><option value="week">{text.pastWeek}</option><option value="month">{text.pastMonth}</option><option value="year">{text.pastYear}</option></select></label>
-      <label><span>{text.size}</span><select value={searchSize} onChange={(event) => setSearchSize(event.target.value as SearchSize)}><option value="any">{text.anySize}</option><option value="small">{text.smallFiles}</option><option value="medium">{text.mediumFiles}</option><option value="large">{text.largeFiles}</option></select></label>
-      <div className="search-panel-actions"><button disabled={!canSave} onClick={saveCurrentSearch}>{text.saveSearch}</button><button className="search-panel-run" onClick={() => void startDeepSearch()}>{text.startSearch}</button></div>
-      {savedSearches.length > 0 && <section className="search-quick-section"><header><span>{text.savedSearches}</span></header><div className="search-quick-list">{savedSearches.map((item) => <div className="search-quick-item" key={item.id}><button title={item.name} onClick={() => void startDeepSearch(item)}>{item.name}</button><button aria-label={text.removeSavedSearch} title={text.removeSavedSearch} onClick={() => removeSavedSearch(item.id)}>×</button></div>)}</div></section>}
-      <section className="search-quick-section"><header><span>{text.recentSearches}</span>{searchHistory.length > 0 && <button onClick={clearSearchHistory}>{text.clearHistory}</button>}</header>{searchHistory.length > 0 ? <div className="search-quick-list history">{searchHistory.map((item) => <button key={`${item.usedAt}-${item.query}-${item.kind}-${item.date}-${item.size}`} title={searchProfileLabel(item)} onClick={() => void startDeepSearch(item)}>{searchProfileLabel(item)}</button>)}</div> : <small>{text.noSearchHistory}</small>}</section>
-    </div>;
+    return <SearchPanel
+      language={language}
+      query={query}
+      kind={searchKind}
+      date={searchDate}
+      size={searchSize}
+      savedSearches={savedSearches}
+      searchHistory={searchHistory}
+      onKindChange={setSearchKind}
+      onDateChange={setSearchDate}
+      onSizeChange={setSearchSize}
+      onSave={saveCurrentSearch}
+      onStart={(profile) => void startDeepSearch(profile)}
+      onRemoveSaved={removeSavedSearch}
+      onClearHistory={clearSearchHistory}
+    />;
   }
 
   return <main className="file-app" onPointerLeave={() => void startExternalFileDrag()}>
