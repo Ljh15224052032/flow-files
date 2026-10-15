@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { FileEntry } from "../types";
 import {
-  batchNameFor, directoryKindForPath, displayName, iconKindFor, labelForPath, nativeDropMode,
+  batchNameFor, canDropPathsInto, directoryKindForPath, displayName, iconKindFor,
+  labelForPath, nativeDropMode,
   parentDirectory, pathCrumbs, sortEntriesForView, typeLabelFor, volumeKey,
 } from "./file-utils";
 
@@ -34,6 +35,15 @@ describe("Windows path helpers", () => {
     expect(nativeDropMode(["D:\\a.txt", "D:\\folder\\b.txt"], "D:\\target")).toBe("move");
     expect(nativeDropMode(["C:\\a.txt"], "D:\\target")).toBe("copy");
     expect(nativeDropMode(["\\\\server\\share\\a.txt"], "\\\\server\\share\\target")).toBe("move");
+  });
+
+  it("blocks recursive and no-op drops while allowing a different destination", () => {
+    expect(canDropPathsInto(["D:\\projects\\flow"], "D:\\projects\\flow")).toBe(false);
+    expect(canDropPathsInto(["D:\\projects\\flow"], "D:\\projects\\flow\\src")).toBe(false);
+    expect(canDropPathsInto(["D:\\projects\\readme.md"], "D:\\projects\\")).toBe(false);
+    expect(canDropPathsInto(["D:\\projects\\readme.md"], "D:\\archive")).toBe(true);
+    expect(canDropPathsInto(["D:/Projects/Flow"], "d:\\projects\\flow\\src\\")).toBe(false);
+    expect(canDropPathsInto([], "D:\\archive")).toBe(false);
   });
 
   it("builds drive and UNC breadcrumbs without losing their roots", () => {

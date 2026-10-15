@@ -1,7 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type UIEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { getCurrentWebview } from "@tauri-apps/api/webview";
 import brandIcon from "../src-tauri/icons/flow-files.svg";
 import "./App.css";
 import {
@@ -17,9 +16,9 @@ import {
 import type {
   BatchRenameDraft, ClaudeCredentialStatus, ClaudeDiagnostic, ClaudeProvider, ClipboardPayload,
   ClipboardState, ColumnWidths, ConflictChoice, ConflictEntry, ConflictResolution, DeleteRequest,
-  DirectoryChanged, DirectoryListing, DirectoryLoadProgress, DirectoryStatus, DragGhost,
+  DirectoryChanged, DirectoryListing, DirectoryLoadProgress, DirectoryStatus,
   DuplicateGroup, DuplicateScanProgress, DuplicateScanResult, DuplicateSizeFilter,
-  DuplicateTypeFilter, EverythingStatus, ExternalDragResult, ExternalOpenTarget,
+  DuplicateTypeFilter, EverythingStatus, ExternalOpenTarget,
   FavoriteItem, FileEntry, FileOperationResult, FilePreview, FolderIntegrationStatus,
   FolderSizeProgress, FolderSizeResult, FolderSizeState, FolderTab, Location, OperationIssue,
   OperationScanProgress, PathSuggestion, PendingTransfer, ResizableColumn, RetryTransfer,
@@ -32,7 +31,7 @@ import type {
 } from "./types";
 import {
   batchNameFor, directoryKindForPath, displayName, iconKindFor, isThumbnailCandidate,
-  joinWindowsPath, labelForPath, localizedLocation, nativeDropMode, parentDirectory, pathCrumbs,
+  joinWindowsPath, labelForPath, localizedLocation, parentDirectory, pathCrumbs,
   sortEntriesForView, typeLabelFor,
 } from "./lib/file-utils";
 import {
@@ -56,6 +55,7 @@ import { SpaceCapacityCard } from "./components/SpaceCapacityCard";
 import { SpaceRankings } from "./components/SpaceRankings";
 import { UI_COPY } from "./localization";
 import { useAppUpdater } from "./hooks/useAppUpdater";
+import { useFileDrag } from "./hooks/useFileDrag";
 import { prioritizeQueuedTask, retryableTaskPaths, type TaskFilter } from "./lib/task-utils";
 import { buildSpaceReport } from "./lib/space-report";
 import { duplicateFileMatchesType, duplicateKeepReason, spaceCategoryAdvice, spaceCategoryLabel, suggestedDuplicateKeep } from "./lib/space-utils";
@@ -209,8 +209,6 @@ function App() {
   const [retryTransfer, setRetryTransfer] = useState<RetryTransfer | null>(null);
   const [pendingTransfer, setPendingTransfer] = useState<PendingTransfer | null>(null);
   const [applyConflictToRemaining, setApplyConflictToRemaining] = useState(true);
-  const [dragTarget, setDragTarget] = useState<string | null>(null);
-  const [dragGhost, setDragGhost] = useState<DragGhost | null>(null);
   const [draggedTabId, setDraggedTabId] = useState<number | null>(null);
   const [tabDropId, setTabDropId] = useState<number | null>(null);
   const [tabDropSide, setTabDropSide] = useState<"before" | "after">("before");
@@ -230,9 +228,7 @@ function App() {
   const fileListRef = useRef<HTMLDivElement>(null);
   const addressInputRef = useRef<HTMLInputElement>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
-  const pointerDragRef = useRef<{ paths: string[]; startX: number; startY: number; target: string | null; active: boolean; dropAllowed: boolean } | null>(null);
   const marqueeRef = useRef<(SelectionBox & { pointerId: number; initialPaths: Set<string>; clientX: number; clientY: number; animationFrame: number | null }) | null>(null);
-  const nativeDropPathsRef = useRef<string[]>([]);
   const tabHoverRef = useRef<{ path: string; timer: number } | null>(null);
   const tabReorderRef = useRef<{ tabId: number; startX: number; startY: number; active: boolean; targetId: number | null; side: "before" | "after" } | null>(null);
   const suppressTabClickRef = useRef(false);
@@ -283,6 +279,25 @@ function App() {
     const roots = home ? [home, ...drives] : drives;
     return roots.filter((location, index) => roots.findIndex((candidate) => candidate.path.toLocaleLowerCase() === location.path.toLocaleLowerCase()) === index);
   }, [locations]);
+  const { armPointerDrag, dragGhost, dragTarget, startExternalFileDrag } = useFileDrag({
+    selectedPaths,
+    renamingPath,
+    operationActive: !!operation,
+    listingPath: listing?.path ?? null,
+    language,
+    scheduleTabHover,
+    clearTabHover,
+    prepareTransfer,
+    handleExternalMove: async (paths) => {
+      const moved = new Set(paths.map((path) => path.toLocaleLowerCase()));
+      setSearchResults((current) => current ? current.filter((entry) => !moved.has(entry.path.toLocaleLowerCase())) : current);
+      setSelected(null);
+      setSelectedPaths(new Set());
+      setSelectionAnchor(null);
+      if (listingRef.current) await refreshDirectory(listingRef.current.path);
+    },
+    setStatus,
+  });
 
   useEffect(() => {
     listingRef.current = listing;
@@ -1677,104 +1692,6 @@ function App() {
   }
 
   useEffect(() => () => clearTabHover(), []);
-
-  function armPointerDrag(entry: FileEntry, event: ReactPointerEvent<HTMLButtonElement>) {
-    if (event.button !== 0 || renamingPath) return;
-    const paths = selectedPaths.has(entry.path) ? [...selectedPaths] : [entry.path];
-    pointerDragRef.current = { paths, startX: event.clientX, startY: event.clientY, target: null, active: false, dropAllowed: false };
-  }
-
-  function canDropInto(paths: string[], target: string) {
-    const normalizedTarget = target.replace(/[\\/]+$/, "").toLocaleLowerCase();
-    if (paths.some((path) => {
-      const source = path.replace(/[\\/]+$/, "").toLocaleLowerCase();
-      return normalizedTarget === source || normalizedTarget.startsWith(`${source}\\`);
-    })) return false;
-    return !paths.every((path) => parentDirectory(path).replace(/[\\/]+$/, "").toLocaleLowerCase() === normalizedTarget);
-  }
-
-  async function startExternalFileDrag() {
-    const drag = pointerDragRef.current;
-    if (!drag?.active || operation) return;
-    pointerDragRef.current = null;
-    setDragTarget(null);
-    setDragGhost(null);
-    try {
-      const result = await invoke<ExternalDragResult>("start_file_drag", { paths: drag.paths });
-      if (result.effect === "move") {
-        const moved = new Set(drag.paths.map((path) => path.toLocaleLowerCase()));
-        setSearchResults((current) => current ? current.filter((entry) => !moved.has(entry.path.toLocaleLowerCase())) : current);
-        setSelected(null);
-        setSelectedPaths(new Set());
-        setSelectionAnchor(null);
-        if (listing) await refreshDirectory(listing.path);
-      }
-      const messages = language === "zh-CN"
-        ? { copy: "已将文件复制到外部位置", move: "已将文件移动到外部位置", link: "已在外部位置创建快捷方式", none: "已取消外部拖放" }
-        : { copy: "Copied files to the external destination.", move: "Moved files to the external destination.", link: "Created links at the external destination.", none: "External drag cancelled." };
-      setStatus(messages[result.effect]);
-    } catch (error) {
-      setStatus(language === "zh-CN" ? `无法拖出文件：${String(error)}` : `Could not drag files outside Flow Files: ${String(error)}`);
-    }
-  }
-
-  useEffect(() => {
-    const elementAt = (x: number, y: number) => document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-drop-path]") ?? null;
-    const move = (event: PointerEvent) => {
-      const drag = pointerDragRef.current;
-      if (!drag) return;
-      if (!drag.active && Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 6) return;
-      drag.active = true;
-      const targetElement = elementAt(event.clientX, event.clientY);
-      drag.target = targetElement?.dataset.dropPath ?? null;
-      drag.dropAllowed = !!drag.target && canDropInto(drag.paths, drag.target);
-      scheduleTabHover(targetElement?.classList.contains("tab") ? drag.target : null);
-      setDragTarget(drag.dropAllowed ? drag.target : null);
-      setDragGhost({
-        x: event.clientX,
-        y: event.clientY,
-        count: drag.paths.length,
-        mode: drag.target && drag.dropAllowed ? nativeDropMode(drag.paths, drag.target) : "blocked",
-        targetLabel: drag.target ? labelForPath(drag.target) : null,
-      });
-      event.preventDefault();
-    };
-    const finish = () => {
-      const drag = pointerDragRef.current;
-      pointerDragRef.current = null;
-      setDragGhost(null);
-      setDragTarget(null);
-      clearTabHover();
-      if (drag?.active && drag.target && drag.dropAllowed && !operation) void prepareTransfer({ mode: nativeDropMode(drag.paths, drag.target), paths: drag.paths }, drag.target);
-    };
-    window.addEventListener("pointermove", move, { passive: false });
-    window.addEventListener("pointerup", finish);
-    window.addEventListener("pointercancel", finish);
-    return () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", finish); window.removeEventListener("pointercancel", finish); };
-  }, [operation, listing?.path, tabs, activeTabId]);
-
-  useEffect(() => {
-    let disposed = false;
-    let stopListening: (() => void) | undefined;
-    const targetAtPhysicalPosition = (x: number, y: number) => {
-      const scale = window.devicePixelRatio || 1;
-      const element = document.elementFromPoint(x / scale, y / scale)?.closest<HTMLElement>("[data-drop-path]") ?? null;
-      return { path: element?.dataset.dropPath ?? listing?.path ?? null, isTab: !!element?.classList.contains("tab") };
-    };
-    void getCurrentWebview().onDragDropEvent(({ payload }) => {
-      if (disposed) return;
-      if (payload.type === "leave") { nativeDropPathsRef.current = []; setDragTarget(null); clearTabHover(); return; }
-      if (payload.type === "enter") nativeDropPathsRef.current = payload.paths;
-      const target = targetAtPhysicalPosition(payload.position.x, payload.position.y);
-      if (payload.type === "enter" || payload.type === "over") { setDragTarget(target.path); scheduleTabHover(target.isTab ? target.path : null); return; }
-      const paths = payload.paths.length ? payload.paths : nativeDropPathsRef.current;
-      nativeDropPathsRef.current = [];
-      setDragTarget(null);
-      clearTabHover();
-      if (target.path && paths.length && !operation) void prepareTransfer({ mode: nativeDropMode(paths, target.path), paths }, target.path);
-    }).then((unlisten) => { if (disposed) unlisten(); else stopListening = unlisten; });
-    return () => { disposed = true; stopListening?.(); };
-  }, [listing?.path, operation, tabs, activeTabId]);
 
   useEffect(() => {
     const prioritizedPaths = selected && visibleImagePaths.includes(selected.path)

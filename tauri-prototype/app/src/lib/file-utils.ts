@@ -24,6 +24,20 @@ export function nativeDropMode(paths: string[], destination: string): "copy" | "
   return destinationVolume && paths.every((path) => volumeKey(path) === destinationVolume) ? "move" : "copy";
 }
 
+function normalizedDropPath(path: string) {
+  return path.replace(/\//g, "\\").replace(/[\\]+$/, "").toLocaleLowerCase();
+}
+
+export function canDropPathsInto(paths: string[], destination: string) {
+  const target = normalizedDropPath(destination);
+  if (!target || paths.length === 0) return false;
+  if (paths.some((path) => {
+    const source = normalizedDropPath(path);
+    return target === source || target.startsWith(`${source}\\`);
+  })) return false;
+  return !paths.every((path) => normalizedDropPath(parentDirectory(path)) === target);
+}
+
 export function displayName(entry: FileEntry, showExtensions: boolean) {
   if (entry.isDirectory || showExtensions) return entry.name;
   const extensionStart = entry.name.lastIndexOf(".");

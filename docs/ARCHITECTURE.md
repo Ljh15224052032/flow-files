@@ -14,7 +14,7 @@
   - 不依赖 React 的纯函数、格式化、持久化解析与安全策略。
   - 新增排序、筛选、恢复、报告和分类规则时，优先在这里实现并添加同名 `.test.ts`。
 - `tauri-prototype/app/src/hooks/`
-  - 可复用的异步生命周期与外部服务状态，例如应用更新器。
+  - 可复用的异步生命周期与外部服务状态，例如应用更新器和 Windows 文件拖放桥接。
 - `tauri-prototype/app/src-tauri/src/`
   - Windows 文件系统、Shell、凭据管理、预览解码和长任务执行。
   - `path_policy.rs` 负责 Windows 路径安全；`error_policy.rs` 负责错误分类；`text_encoding.rs` 负责文本解码；`transfer_rate.rs` 负责复制限速计算。
@@ -26,6 +26,7 @@
 | 能力 | 入口 |
 | --- | --- |
 | 文件名、路径、类型与排序 | `src/lib/file-utils.ts` |
+| 文件拖入、拖出与跨目录放置生命周期 | `src/hooks/useFileDrag.ts` |
 | 收藏、会话、任务、撤销和空间快照持久化 | `src/lib/storage.ts` |
 | 任务筛选、优先级与失败重试路径 | `src/lib/task-utils.ts` |
 | 网络位置提示与退避重试 | `src/lib/network-utils.ts` |
