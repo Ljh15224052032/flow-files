@@ -36,6 +36,17 @@
 
 脚本从当前用户的 `.tauri` 目录读取私钥和 DPAPI 加密的密码备份，密钥只进入构建进程环境，不打印也不写入仓库。输出会列出安装包、更新签名和 SHA-256。该签名用于 Tauri 更新器验证；Windows 安装包本身若未配置代码签名证书，仍可能显示 SmartScreen 提示。
 
+构建后使用实际输出的路径和 SHA-256 做静态验收：
+
+```powershell
+.\tools\Test-InstallerCandidate.ps1 `
+  -InstallerPath 'C:\path\to\Flow Files_0.2.0_x64-setup.exe' `
+  -ExpectedVersion '0.2.0' `
+  -ExpectedSha256 '<Build-SignedInstaller 输出的哈希>'
+```
+
+该脚本会重新核对四处项目版本、安装包产品元数据、文件哈希、`.sig` 是否为可解码的 Tauri minisign 信封，以及签名内记录的文件名和版本。它不能替代更新器运行时的公钥验签，也不能替代下方实机安装矩阵。`WindowsCodeSignature=NotSigned` 表示尚未购买 Windows 代码签名证书，与 Tauri 更新签名是两套不同机制。
+
 ## 2. 测试环境
 
 为避免影响日常使用，优先在 Windows Sandbox、测试账户或虚拟机执行。实机测试前先退出正在运行的 Flow Files，并备份以下数据：
