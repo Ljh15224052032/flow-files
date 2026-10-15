@@ -51,6 +51,7 @@ import { StatusBar } from "./components/StatusBar";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { SearchPanel } from "./components/SearchPanel";
 import { SpaceHealthDialog } from "./components/SpaceHealthDialog";
+import { ViewportContextMenu } from "./components/ViewportContextMenu";
 import { UI_COPY } from "./localization";
 import { useAppUpdater } from "./hooks/useAppUpdater";
 import { useFileDrag } from "./hooks/useFileDrag";
@@ -1381,7 +1382,7 @@ function App() {
     }
     setOpenMenu(null);
     setTabContextMenu(null);
-    setContextMenu({ x: Math.max(8, Math.min(event.clientX, window.innerWidth - 230)), y: Math.max(8, Math.min(event.clientY, window.innerHeight - 570)), kind: "entry" });
+    setContextMenu({ x: event.clientX, y: event.clientY, kind: "entry" });
   }
 
   function openBackgroundContextMenu(event: ReactMouseEvent<HTMLDivElement>) {
@@ -1392,7 +1393,7 @@ function App() {
     setSelectionAnchor(null);
     setOpenMenu(null);
     setTabContextMenu(null);
-    setContextMenu({ x: Math.max(8, Math.min(event.clientX, window.innerWidth - 230)), y: Math.max(8, Math.min(event.clientY, window.innerHeight - 310)), kind: "background" });
+    setContextMenu({ x: event.clientX, y: event.clientY, kind: "background" });
   }
 
   function selectAll() {
@@ -2089,7 +2090,7 @@ function App() {
     event.stopPropagation();
     setContextMenu(null);
     setOpenMenu(null);
-    setTabContextMenu({ x: Math.min(event.clientX, window.innerWidth - 230), y: Math.min(event.clientY, window.innerHeight - 150), tabId });
+    setTabContextMenu({ x: event.clientX, y: event.clientY, tabId });
   }
 
   function armTabReorder(tabId: number, event: ReactPointerEvent<HTMLButtonElement>) {
@@ -2226,7 +2227,7 @@ function App() {
     if (!items.length) return;
     setContextMenu(null);
     setTabContextMenu(null);
-    setHistoryMenu({ x: Math.min(event.clientX, window.innerWidth - 280), y: Math.min(event.clientY, window.innerHeight - 260), items });
+    setHistoryMenu({ x: event.clientX, y: event.clientY, items });
   }
 
   function navigateToHistory(index: number, path: string) {
@@ -3108,7 +3109,7 @@ function App() {
       onRemoveClaudeApiKey={() => void removeClaudeApiKey()}
       onRunClaudeDiagnostic={() => void runClaudeDiagnostic()}
     />}
-    {contextMenu?.kind === "entry" && <div className="context-menu" style={{ left: contextMenu.x, top: contextMenu.y }} onPointerDown={(event) => event.stopPropagation()}>
+    {contextMenu?.kind === "entry" && <ViewportContextMenu x={contextMenu.x} y={contextMenu.y} onPointerDown={(event) => event.stopPropagation()}>
       <button disabled={!selected || selectedPaths.size !== 1} onClick={() => { setContextMenu(null); if (selected) void openEntry(selected); }}><span>{text.open}</span><kbd>Enter</kbd></button>
       <button disabled={!selected || selectedPaths.size !== 1 || selected.isDirectory} onClick={() => { setContextMenu(null); void openWithSelected(); }}><span>{text.openWith}</span></button>
       <button disabled={!listing} onClick={() => { const path = terminalPathForSelection(); setContextMenu(null); void openTerminalAt(path); }}><span>{text.terminalHere}</span></button>
@@ -3132,8 +3133,8 @@ function App() {
       <button disabled={!selected || selectedPaths.size !== 1} onClick={() => void showSelectedSystemMenu()}><span>{text.systemMenu}</span><kbd>Shift+F10</kbd></button>
       <hr />
       <button disabled={!selected || selectedPaths.size !== 1} onClick={() => { setContextMenu(null); void showSelectedProperties(); }}><span>{text.properties}</span><kbd>Alt+Enter</kbd></button>
-    </div>}
-    {contextMenu?.kind === "background" && <div className="context-menu" style={{ left: contextMenu.x, top: contextMenu.y }} onPointerDown={(event) => event.stopPropagation()}>
+    </ViewportContextMenu>}
+    {contextMenu?.kind === "background" && <ViewportContextMenu x={contextMenu.x} y={contextMenu.y} onPointerDown={(event) => event.stopPropagation()}>
       <button onClick={() => void createItem("folder")}><span>{text.newFolder}</span></button>
       <button onClick={() => void createItem("text")}><span>{text.newTextFile}</span></button>
       <button onClick={() => void createItem("markdown")}><span>{text.newMarkdownFile}</span></button>
@@ -3142,8 +3143,8 @@ function App() {
       <button onClick={() => { setContextMenu(null); if (listing) void browse(listing.path, activeTabId, false); }}><span>{text.refresh}</span><kbd>F5</kbd></button>
       <button onClick={() => { setContextMenu(null); void openTerminalAt(); }}><span>{text.terminalHere}</span></button>
       <button onClick={() => { setContextMenu(null); void openTerminalAt(listing?.path, "claude"); }}><span>{text.claudeHere}</span><b>›_</b></button>
-    </div>}
-    {tabContextMenu && contextTab && <div className="context-menu tab-context-menu" style={{ left: tabContextMenu.x, top: tabContextMenu.y }} onPointerDown={(event) => event.stopPropagation()}>
+    </ViewportContextMenu>}
+    {tabContextMenu && contextTab && <ViewportContextMenu x={tabContextMenu.x} y={tabContextMenu.y} className="tab-context-menu" onPointerDown={(event) => event.stopPropagation()}>
       <button onClick={() => toggleTabPinned(contextTab.id)}><span>{contextTab.pinned ? text.unpinTab : text.pinTab}</span><b>{contextTab.pinned ? "⌖" : ""}</b></button>
       <button onClick={() => duplicateTab(contextTab)}><span>{text.duplicateTab}</span></button>
       <button disabled={!closedTabs.length} onClick={reopenClosedTab}><span>{text.reopenClosedTab}</span><kbd>Ctrl+Shift+T</kbd></button>
@@ -3152,8 +3153,8 @@ function App() {
       <hr />
       <button disabled={contextTab.pinned || tabs.length === 1} onClick={() => closeTabById(contextTab.id)}><span>{text.closeTab}</span><kbd>Ctrl+W</kbd></button>
       <button disabled={tabs.every((tab) => tab.id === contextTab.id || tab.pinned)} onClick={() => closeOtherTabs(contextTab.id)}><span>{text.closeOtherTabs}</span></button>
-    </div>}
-    {historyMenu && <div className="context-menu history-context-menu" style={{ left: historyMenu.x, top: historyMenu.y }} onPointerDown={(event) => event.stopPropagation()}>{historyMenu.items.map((item) => <button key={`${item.index}-${item.path}`} title={item.path} onClick={() => navigateToHistory(item.index, item.path)}><span>{labelForPath(item.path)}</span><small>{item.path}</small></button>)}</div>}
+    </ViewportContextMenu>}
+    {historyMenu && <ViewportContextMenu x={historyMenu.x} y={historyMenu.y} className="history-context-menu" onPointerDown={(event) => event.stopPropagation()}>{historyMenu.items.map((item) => <button key={`${item.index}-${item.path}`} title={item.path} onClick={() => navigateToHistory(item.index, item.path)}><span>{labelForPath(item.path)}</span><small>{item.path}</small></button>)}</ViewportContextMenu>}
     {dragGhost && <div className={`drag-ghost ${dragGhost.mode}`} style={{ left: dragGhost.x + 14, top: dragGhost.y + 14 }}><b>{dragGhost.mode === "blocked" ? "×" : dragGhost.mode === "copy" ? "+" : "→"}</b><span>{dragGhost.mode === "blocked" ? (language === "zh-CN" ? "不能放在这里" : "Can't drop here") : language === "zh-CN" ? `${dragGhost.mode === "copy" ? "复制" : "移动"} ${dragGhost.count} 项到 ${dragGhost.targetLabel}` : `${dragGhost.mode === "copy" ? "Copy" : "Move"} ${dragGhost.count} item(s) to ${dragGhost.targetLabel}`}</span></div>}
   </main>;
 }

@@ -844,13 +844,16 @@ footer { position: relative; z-index: 2; display: flex; min-width: 0; min-height
 .task-actions button, .task-center > footer button { border: 1px solid var(--border-strong); border-radius: 7px; background: var(--surface); padding: 4px 10px; color: #d4d4d4; font-size: 11px; }
 .task-actions button:hover, .task-center > footer button:hover { background: var(--selected); }
 .task-center > footer { display: flex; min-height: 42px; justify-content: flex-end; border-width: 1px 0 0; padding: 7px 10px; }
-.context-menu { position: fixed; z-index: 180; display: grid; width: 220px; max-height: calc(100vh - 16px); gap: 3px; overflow: auto; padding: 7px; border: 1px solid var(--border-strong); border-radius: 10px; background: var(--surface); box-shadow: 0 16px 42px #000b; }
+.context-menu { position: fixed; z-index: 180; display: grid; width: 220px; max-height: calc(100vh - 16px); gap: 3px; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; padding: 7px; border: 1px solid var(--border-strong); border-radius: 10px; background: var(--surface); box-shadow: 0 16px 42px #000b; scrollbar-color: #555 transparent; scrollbar-width: thin; }
 .context-menu button { display: flex; min-height: 34px; align-items: center; justify-content: space-between; border: 1px solid transparent; border-radius: 6px; background: transparent; padding: 7px 9px; color: #c9c9c9; text-align: left; }
 .context-menu button:hover:not(:disabled) { border-color: var(--border); background: var(--hover); color: #f1f1f1; }
 .context-menu button.danger { color: var(--danger); }
 .context-menu button:disabled { opacity: .38; }
 .context-menu kbd { color: #777; font: 11px/1 "Segoe UI", sans-serif; }
 .context-menu hr { width: 100%; margin: 3px 0; border: 0; border-top: 1px solid var(--border); }
+.context-menu::-webkit-scrollbar { width: 8px; }
+.context-menu::-webkit-scrollbar-track { margin: 6px 0; background: transparent; }
+.context-menu::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: 999px; background: #555; background-clip: padding-box; }
 .tab-context-menu { width: 210px; }
 .tab-context-menu b { color: var(--muted-strong); font-weight: 500; }
 .history-context-menu { width: 270px; max-height: min(420px, calc(100vh - 24px)); overflow-y: auto; }
