@@ -866,7 +866,7 @@ footer { position: relative; z-index: 2; display: flex; min-width: 0; min-height
 @media (max-width: 1220px) {
   .content.with-preview-layout { --preview-width: clamp(220px, 25vw, 260px); }
   .content.with-preview-layout .columns { grid-template-columns: minmax(130px, 1fr) minmax(96px, var(--modified-width)) minmax(72px, var(--type-width)) minmax(60px, var(--size-width)); }
-  .content.with-preview-layout .file-row { grid-template-columns: 28px minmax(105px, 1fr) minmax(96px, var(--modified-width)) minmax(72px, var(--type-width)) minmax(60px, var(--size-width)); }
+  .content.with-preview-layout .file-list:not(.view-grid) .file-row { grid-template-columns: 28px minmax(105px, 1fr) minmax(96px, var(--modified-width)) minmax(72px, var(--type-width)) minmax(60px, var(--size-width)); }
   .content.with-preview-layout .toolbar-control { width: 36px; padding-right: 7px; padding-left: 7px; gap: 0; }
   .content.with-preview-layout .toolbar-control > span,
   .content.with-preview-layout .toolbar-control .chevron-icon { display: none; }
