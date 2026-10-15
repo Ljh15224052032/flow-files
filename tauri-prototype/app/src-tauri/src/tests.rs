@@ -456,6 +456,33 @@ fn copies_folders_without_progress_and_classifies_windows_errors() {
     fs::remove_dir_all(&sandbox).expect("remove isolated copy folder");
 }
 
+#[cfg(windows)]
+#[test]
+fn classifies_a_real_windows_file_lock_as_in_use() {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    let sandbox = fresh_test_directory("locked-file");
+    let source = sandbox.join("locked.txt");
+    let target = sandbox.join("copy.txt");
+    fs::write(&source, "locked content").expect("create locked source file");
+    let lock = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .share_mode(0)
+        .open(&source)
+        .expect("open source with exclusive Windows sharing mode");
+
+    let error = fs::copy(&source, &target).expect_err("exclusive lock must prevent copying");
+    assert_eq!(
+        classify_operation_issue(&error.to_string()),
+        "inUse",
+        "unexpected Windows lock error: {error}"
+    );
+
+    drop(lock);
+    fs::remove_dir_all(&sandbox).expect("remove locked-file test directory");
+}
+
 #[test]
 fn creates_extracts_zip_and_batch_renames_transactionally() {
     let sandbox = env::temp_dir().join(format!(
