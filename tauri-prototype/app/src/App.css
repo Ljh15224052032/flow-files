@@ -337,7 +337,17 @@ button:disabled { cursor: default; opacity: .4; }
 .preview-content > button { margin-top: 5px; border: 1px solid var(--border-strong); border-radius: 7px; background: var(--surface); padding: 6px 16px; color: #e4e4e4; }
 .preview-content > button:hover { border-color: #5b5b5b; background: var(--selected); }
 .preview-visual { display: grid; width: 100%; min-height: 180px; max-height: 52vh; place-items: center; overflow: hidden; border-radius: 8px; background: #141414; }
-.preview-visual img { display: block; width: 100%; height: 100%; max-height: 52vh; object-fit: contain; }
+.preview-visual.image, .preview-visual.svg, .preview-visual.heic { height: min(52vh, 420px); }
+.image-preview-shell { display: grid; width: 100%; height: 100%; min-height: 180px; grid-template-rows: 34px minmax(0, 1fr); overflow: hidden; }
+.image-preview-tools { position: relative; z-index: 2; }
+.image-preview-tools .image-fit-button, .image-preview-tools .image-actual-button { min-width: auto; padding: 0 7px; }
+.image-preview-stage { position: relative; min-width: 0; min-height: 0; overflow: hidden; outline: none; cursor: default; touch-action: none; user-select: none; }
+.image-preview-stage:focus-visible { box-shadow: inset 0 0 0 1px #737373; }
+.image-preview-stage.zoomed { cursor: grab; }
+.image-preview-stage.dragging { cursor: grabbing; }
+.image-preview-canvas { position: absolute; inset: 0; display: grid; place-items: center; will-change: transform; }
+.image-preview-stage img { display: block; width: auto; height: auto; max-width: 100%; max-height: 100%; pointer-events: none; object-fit: contain; transform-origin: center; transition: transform .08s ease-out; -webkit-user-drag: none; }
+.image-preview-stage.dragging img { transition: none; }
 .preview-visual iframe { display: block; width: 100%; height: 100%; min-height: 260px; border: 0; background: #111; }
 .pdf-preview-shell, .text-preview-shell { display: grid; width: 100%; height: 100%; min-height: 260px; grid-template-rows: 34px minmax(0, 1fr); overflow: hidden; }
 .preview-toolstrip { display: flex; min-width: 0; align-items: center; gap: 5px; border-bottom: 1px solid var(--border); background: #1d1d1d; padding: 4px 6px; color: var(--muted-strong); font-size: 10px; }
