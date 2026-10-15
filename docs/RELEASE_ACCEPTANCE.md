@@ -45,13 +45,13 @@
   -ExpectedSha256 '<Build-SignedInstaller 输出的哈希>'
 ```
 
-该脚本会重新核对四处项目版本、安装包产品元数据、文件哈希、`.sig` 是否为可解码的 Tauri minisign 信封，以及签名内记录的文件名和版本。它不能替代更新器运行时的公钥验签，也不能替代下方实机安装矩阵。`WindowsCodeSignature=NotSigned` 表示尚未购买 Windows 代码签名证书，与 Tauri 更新签名是两套不同机制。
+构建脚本默认拒绝脏工作区，并在安装包旁生成 `.candidate.json`，记录完整 Git 提交、安装包与更新签名的哈希、稳定应用标识和安装模式。静态验收会重新核对该清单、四处项目版本、安装包产品元数据、文件哈希、`.sig` 是否为可解码的 Tauri minisign 信封，以及签名内记录的文件名和版本。它不能替代更新器运行时的公钥验签，也不能替代下方实机安装矩阵。`WindowsCodeSignature=NotSigned` 表示尚未购买 Windows 代码签名证书，与 Tauri 更新签名是两套不同机制。
 
 ## 2. 测试环境
 
 为避免影响日常使用，优先在 Windows Sandbox、测试账户或虚拟机执行。实机测试前先退出正在运行的 Flow Files，并备份以下数据：
 
-- `%APPDATA%\com.coderebuild.filemanagerlab`
+- `%LOCALAPPDATA%\com.coderebuild.filemanagerlab`（WebView 本地状态；这是当前实际持久化位置）
 - Windows 凭据管理器中由 Flow Files 创建的 Claude/DeepSeek 配置
 - 当前桌面和开始菜单快捷方式的截图或记录
 
