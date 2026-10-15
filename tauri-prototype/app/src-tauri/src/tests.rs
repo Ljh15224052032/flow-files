@@ -483,6 +483,41 @@ fn classifies_a_real_windows_file_lock_as_in_use() {
     fs::remove_dir_all(&sandbox).expect("remove locked-file test directory");
 }
 
+#[cfg(windows)]
+#[test]
+fn classifies_a_real_read_only_target_as_access_denied() {
+    let sandbox = fresh_test_directory("read-only-target");
+    let source = sandbox.join("source.txt");
+    let target = sandbox.join("target.txt");
+    fs::write(&source, "replacement content").expect("create copy source");
+    fs::write(&target, "protected original").expect("create protected target");
+    let mut permissions = fs::metadata(&target)
+        .expect("read target metadata")
+        .permissions();
+    permissions.set_readonly(true);
+    fs::set_permissions(&target, permissions).expect("mark target read-only");
+
+    let error =
+        copy_path_plain(&source, &target).expect_err("read-only target must reject copying");
+    assert_eq!(
+        classify_operation_issue(&error),
+        "accessDenied",
+        "unexpected Windows read-only error: {error}"
+    );
+    assert_eq!(
+        fs::read_to_string(&target).expect("read protected target"),
+        "protected original",
+        "failed copy must not alter the protected target"
+    );
+
+    let mut permissions = fs::metadata(&target)
+        .expect("read target metadata for cleanup")
+        .permissions();
+    permissions.set_readonly(false);
+    fs::set_permissions(&target, permissions).expect("clear read-only flag for cleanup");
+    fs::remove_dir_all(&sandbox).expect("remove read-only-target test directory");
+}
+
 #[test]
 fn rolls_back_partial_targets_on_injected_disk_full() {
     let sandbox = fresh_test_directory("disk-full-rollback");
