@@ -4,11 +4,23 @@ import {
   SPACE_SCAN_SNAPSHOTS_KEY, UNDO_RETENTION_MS, UNDO_STACK_KEY,
 } from "../constants";
 import type {
-  ConflictResolution, FavoriteItem, FolderTab, SavedSearch, SearchDate, SearchHistoryItem,
+  ConflictResolution, FavoriteItem, FolderTab, OperationIssue, SavedSearch, SearchDate, SearchHistoryItem,
   SearchKind, SearchProfile, SearchSize, SpaceScanResult, SpaceScanSnapshot, TransferTask,
   TransferTaskStatus, UndoAction, UndoRecord, ViewMode,
 } from "../types";
 import { labelForPath } from "./file-utils";
+
+const OPERATION_ISSUE_CODES: OperationIssue["code"][] = ["accessDenied", "inUse", "diskFull", "pathTooLong", "network", "notFound", "other"];
+
+function parseStoredOperationIssues(value: unknown): OperationIssue[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item): OperationIssue[] => {
+    if (!item || typeof item !== "object") return [];
+    const candidate = item as Partial<OperationIssue>;
+    if (typeof candidate.path !== "string" || !candidate.path.trim() || typeof candidate.message !== "string" || !OPERATION_ISSUE_CODES.includes(candidate.code as OperationIssue["code"])) return [];
+    return [{ path: candidate.path, code: candidate.code as OperationIssue["code"], message: candidate.message.slice(0, 1000) }];
+  });
+}
 
 export function readStoredFavorites() {
   try {
@@ -172,7 +184,7 @@ export function readStoredOperationTasks(): TransferTask[] {
         completedItems: typeof candidate.completedItems === "number" ? candidate.completedItems : 0, totalItems: typeof candidate.totalItems === "number" ? candidate.totalItems : candidate.sourcePaths.length,
         currentName: typeof candidate.currentName === "string" ? candidate.currentName : "", phase: candidate.phase === "transfer" ? "transfer" : "scanning",
         scannedItems: typeof candidate.scannedItems === "number" ? candidate.scannedItems : 0, scannedBytes: typeof candidate.scannedBytes === "number" ? candidate.scannedBytes : 0, speed: 0,
-        issues: Array.isArray(candidate.issues) ? candidate.issues : [], error: interrupted ? "Flow Files closed before this task completed." : typeof candidate.error === "string" ? candidate.error.slice(0, 1000) : null,
+        issues: parseStoredOperationIssues(candidate.issues), error: interrupted ? "Flow Files closed before this task completed." : typeof candidate.error === "string" ? candidate.error.slice(0, 1000) : null,
         recoveredFromRestart: interrupted || candidate.recoveredFromRestart === true,
       }];
     }).slice(-20);

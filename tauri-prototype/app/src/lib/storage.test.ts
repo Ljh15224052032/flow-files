@@ -74,6 +74,21 @@ describe("persisted Flow Files state", () => {
     expect(stored[19].jobId).toBe("job-23");
   });
 
+  it("drops malformed persisted operation issues before task recovery", () => {
+    localStorage.setItem(OPERATION_TASKS_KEY, JSON.stringify([{
+      jobId: "failed-1", mode: "copy", sourcePaths: ["C:\\source.txt"], destination: "D:\\target",
+      conflict: "skip", conflictResolutions: [], status: "failed", queuedAt: 1, startedAt: 1,
+      issues: [
+        { path: "C:\\locked.txt", code: "inUse", message: "locked" },
+        { path: null, code: "network", message: "bad path" },
+        { path: "C:\\unknown.txt", code: "invented", message: "bad code" },
+        "not an issue",
+      ],
+    }]));
+    const [task] = readStoredOperationTasks();
+    expect(task.issues).toEqual([{ path: "C:\\locked.txt", code: "inUse", message: "locked" }]);
+  });
+
   it("sanitizes restored sessions instead of trusting arbitrary storage", () => {
     localStorage.setItem(SESSION_KEY, JSON.stringify({
       activeTabId: 7,
