@@ -1,4 +1,7 @@
-import type { DuplicateGroup, DuplicateTypeFilter, SpaceCategoryAdvice, SpaceScanItem, UiLanguage } from "../types";
+import type {
+  DuplicateGroup, DuplicateSizeFilter, DuplicateTypeFilter, SpaceCategoryAdvice,
+  SpaceCleanupAge, SpaceScanItem, UiLanguage,
+} from "../types";
 
 const TRANSIENT_PATH = /[\\/](temp|tmp|cache|caches|\.cache|\$recycle\.bin|node_modules)[\\/]/i;
 
@@ -38,6 +41,39 @@ export function duplicateFileMatchesType(item: SpaceScanItem, type: DuplicateTyp
   };
   const known = Object.values(groups).some((extensions) => extensions.has(extension));
   return type === "other" ? !known : groups[type].has(extension);
+}
+
+export function filterSpaceCleanupCandidates(
+  candidates: SpaceScanItem[],
+  age: SpaceCleanupAge,
+  nowUnixSeconds = Math.floor(Date.now() / 1000),
+) {
+  if (age === "all") return candidates;
+  const cutoff = nowUnixSeconds - Number(age) * 86400;
+  return candidates.filter((item) => !!item.modifiedUnixSeconds && item.modifiedUnixSeconds <= cutoff);
+}
+
+export function filterDuplicateGroups(
+  groups: DuplicateGroup[],
+  query: string,
+  sizeFilter: DuplicateSizeFilter,
+  typeFilter: DuplicateTypeFilter,
+) {
+  const minimumSize = sizeFilter === "10mb" ? 10 * 1024 * 1024
+    : sizeFilter === "100mb" ? 100 * 1024 * 1024
+      : sizeFilter === "1gb" ? 1024 * 1024 * 1024
+        : 0;
+  const needle = query.trim().toLocaleLowerCase();
+  return groups.filter((group) => group.fileSize >= minimumSize && group.files.some((item) => {
+    const matchesText = !needle
+      || item.name.toLocaleLowerCase().includes(needle)
+      || item.path.toLocaleLowerCase().includes(needle);
+    return matchesText && duplicateFileMatchesType(item, typeFilter);
+  }));
+}
+
+export function selectedSpaceItemBytes(items: SpaceScanItem[], selectedPaths: ReadonlySet<string>) {
+  return items.reduce((sum, item) => sum + (selectedPaths.has(item.path) ? item.size : 0), 0);
 }
 
 const CATEGORY_LABELS: Record<string, [string, string]> = {

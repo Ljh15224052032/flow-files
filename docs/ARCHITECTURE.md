@@ -9,7 +9,8 @@
   - 可以组合组件，但不应继续承载大块对话框 JSX 或可独立测试的判断规则。
 - `tauri-prototype/app/src/components/`
   - 只负责界面展示和明确的用户事件回调。
-  - 当前已拆分预览、任务中心、操作确认、状态栏、设置、搜索筛选、空间历史、容量摘要和空间排行榜。
+  - 当前已拆分预览、任务中心、操作确认、状态栏、设置、搜索筛选，以及完整的磁盘体检对话框。
+  - `SpaceHealthDialog.tsx` 负责空间体检、重复文件复核和安全清理预览的展示与派生视图；扫描、剪贴板和文件变更仍由 `App.tsx` 编排。
 - `tauri-prototype/app/src/lib/`
   - 不依赖 React 的纯函数、格式化、持久化解析与安全策略。
   - 新增排序、筛选、恢复、报告和分类规则时，优先在这里实现并添加同名 `.test.ts`。
@@ -32,7 +33,7 @@
 | 网络位置提示与退避重试 | `src/lib/network-utils.ts` |
 | 搜索条件比较与名称生成 | `src/lib/search-utils.ts` |
 | 空间历史、容量比例与增长计算 | `src/lib/space-history.ts` |
-| 空间诊断建议与重复文件规则 | `src/lib/space-utils.ts` |
+| 空间诊断建议、清理筛选与重复文件规则 | `src/lib/space-utils.ts` |
 | 磁盘诊断报告 | `src/lib/space-report.ts` |
 | 文件操作错误分类 | `src-tauri/src/error_policy.rs` |
 | Windows 名称与递归目标保护 | `src-tauri/src/path_policy.rs` |
