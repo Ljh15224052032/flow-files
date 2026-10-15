@@ -59,7 +59,7 @@ import { useFileDrag } from "./hooks/useFileDrag";
 import { prioritizeQueuedTask, retryableTaskPaths, type TaskFilter } from "./lib/task-utils";
 import { buildSpaceReport } from "./lib/space-report";
 import { duplicateFileMatchesType, duplicateKeepReason, spaceCategoryAdvice, spaceCategoryLabel, suggestedDuplicateKeep } from "./lib/space-utils";
-import { nextAvailabilityRetry, unavailableLocationCopy } from "./lib/network-utils";
+import { availabilityRetryAfterStatus, unavailableLocationCopy } from "./lib/network-utils";
 import { searchProfileLabel, searchProfilesMatch } from "./lib/search-utils";
 
 function readStoredSortKey(): SortKey {
@@ -373,12 +373,12 @@ function App() {
 
   function updateAvailabilityRetry(status: DirectoryStatus) {
     const key = status.path.toLocaleLowerCase();
-    if (status.available) {
+    const next = availabilityRetryAfterStatus(availabilityRetryRef.current.get(key), status);
+    if (!next) {
       availabilityRetryRef.current.delete(key);
       return;
     }
-    const previous = availabilityRetryRef.current.get(key)?.failures ?? 0;
-    availabilityRetryRef.current.set(key, nextAvailabilityRetry(previous));
+    availabilityRetryRef.current.set(key, next);
   }
 
   useEffect(() => {

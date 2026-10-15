@@ -22,3 +22,7 @@ export function nextAvailabilityRetry(previousFailures: number, now = Date.now()
   const delay = Math.min(120_000, 8_000 * (2 ** Math.max(0, failures - 1)));
   return { failures, nextAt: now + delay };
 }
+
+export function availabilityRetryAfterStatus(previous: AvailabilityRetry | undefined, status: DirectoryStatus, now = Date.now()) {
+  return status.available ? null : nextAvailabilityRetry(previous?.failures ?? 0, now);
+}

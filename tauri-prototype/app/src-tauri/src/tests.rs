@@ -555,6 +555,30 @@ fn creates_lists_and_copies_a_real_extended_length_path() {
     fs::remove_dir_all(&sandbox).expect("remove extended-length test directory");
 }
 
+#[cfg(windows)]
+#[test]
+fn detects_a_real_unreachable_unc_location_and_a_recovered_directory() {
+    let missing_share = format!(
+        r"\\127.0.0.1\flow-files-missing-share-{}",
+        std::process::id()
+    );
+    let unavailable = tauri::async_runtime::block_on(check_directory_status(missing_share.clone()))
+        .expect("check an unreachable local UNC share");
+    assert_eq!(unavailable.path, missing_share);
+    assert!(!unavailable.available);
+    assert_eq!(unavailable.kind, "network");
+    assert_eq!(unavailable.reason.as_deref(), Some("unreachable"));
+
+    let recovered = fresh_test_directory("network-recovery");
+    let available =
+        tauri::async_runtime::block_on(check_directory_status(recovered.display().to_string()))
+            .expect("check a recovered local directory");
+    assert!(available.available);
+    assert_eq!(available.reason, None);
+
+    fs::remove_dir_all(&recovered).expect("remove network-recovery test directory");
+}
+
 #[test]
 fn rolls_back_partial_targets_on_injected_disk_full() {
     let sandbox = fresh_test_directory("disk-full-rollback");
