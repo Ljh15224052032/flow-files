@@ -59,6 +59,11 @@ import { prioritizeQueuedTask, retryableTaskPaths, type TaskFilter } from "./lib
 import { buildSpaceReport } from "./lib/space-report";
 import { availabilityRetryAfterStatus, unavailableLocationCopy } from "./lib/network-utils";
 import { searchProfileLabel, searchProfilesMatch } from "./lib/search-utils";
+import { formatPathsForClipboard } from "./lib/clipboard-utils";
+
+type ContextMenuState =
+  | { x: number; y: number; kind: "entry" | "background" }
+  | { x: number; y: number; kind: "path"; path: string };
 
 function readStoredSortKey(): SortKey {
   const stored = localStorage.getItem(SORT_KEY);
@@ -219,7 +224,7 @@ function App() {
   const [batchRenameDraft, setBatchRenameDraft] = useState<BatchRenameDraft>({ find: "", replace: "", prefix: "", suffix: "", addNumbers: false, startNumber: 1 });
   const [batchRenameError, setBatchRenameError] = useState<string | null>(null);
   const [archiveBusy, setArchiveBusy] = useState(false);
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; kind: "entry" | "background" } | null>(null);
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [tabContextMenu, setTabContextMenu] = useState<{ x: number; y: number; tabId: number } | null>(null);
   const [closedTabs, setClosedTabs] = useState<FolderTab[]>([]);
   const [historyMenu, setHistoryMenu] = useState<{ x: number; y: number; items: { index: number; path: string }[] } | null>(null);
@@ -1396,6 +1401,15 @@ function App() {
     setContextMenu({ x: event.clientX, y: event.clientY, kind: "background" });
   }
 
+  function openPathContextMenu(path: string, event: ReactMouseEvent<HTMLElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    setOpenMenu(null);
+    setTabContextMenu(null);
+    setHistoryMenu(null);
+    setContextMenu({ x: event.clientX, y: event.clientY, kind: "path", path });
+  }
+
   function selectAll() {
     setSelectedPaths(new Set(sortedEntries.map((entry) => entry.path)));
     setSelected(sortedEntries[0] ?? null);
@@ -1445,14 +1459,32 @@ function App() {
     } catch (error) { setStatus(language === "zh-CN" ? `无法访问系统剪贴板：${String(error)}` : `Could not access the Windows clipboard: ${String(error)}`); }
   }
 
+  async function copyPathsToClipboard(paths: string[], quoted: boolean) {
+    if (paths.length === 0) return;
+    try {
+      await invoke("set_text_clipboard", { text: formatPathsForClipboard(paths, quoted) });
+      setOpenMenu(null);
+      setContextMenu(null);
+      setStatus(language === "zh-CN"
+        ? `已复制 ${paths.length} 个${quoted ? "带引号路径" : "文本路径"}`
+        : `Copied ${paths.length} ${quoted ? "quoted path(s)" : "path(s) as text"}.`);
+    } catch (error) {
+      setStatus(language === "zh-CN" ? `无法复制路径：${String(error)}` : `Could not copy path: ${String(error)}`);
+    }
+  }
+
   async function copySelectionText(mode: "path" | "name") {
     if (selectedPaths.size === 0) return;
-    const values = mode === "path" ? [...selectedPaths] : selectedEntries.map((entry) => entry.name);
+    if (mode === "path") {
+      await copyPathsToClipboard([...selectedPaths], true);
+      return;
+    }
+    const values = selectedEntries.map((entry) => entry.name);
     try {
       await invoke("set_text_clipboard", { text: values.join("\r\n") });
       setOpenMenu(null);
       setContextMenu(null);
-      setStatus(language === "zh-CN" ? `已复制 ${values.length} 个项目的${mode === "path" ? "路径" : "名称"}` : `Copied ${values.length} item ${mode === "path" ? "path(s)" : "name(s)"}.`);
+      setStatus(language === "zh-CN" ? `已复制 ${values.length} 个项目的名称` : `Copied ${values.length} item name(s).`);
     } catch (error) {
       setStatus(language === "zh-CN" ? `无法复制文本：${String(error)}` : `Could not copy text: ${String(error)}`);
     }
@@ -2953,9 +2985,9 @@ function App() {
         {selected?.isDirectory && selectedPaths.size === 1 && <div className="folder-size-card">{folderSize ? <><strong>{formatSize(folderSize.totalBytes)}</strong><span>{language === "zh-CN" ? `${folderSize.scannedFiles} 个文件 · ${folderSize.scannedFolders} 个文件夹` : `${folderSize.scannedFiles} files · ${folderSize.scannedFolders} folders`}</span>{folderSize.issues > 0 && <small>{language === "zh-CN" ? `${folderSize.issues} 个位置无法读取` : `${folderSize.issues} locations could not be read`}</small>}{folderSize.running ? <button onClick={cancelFolderSizeCalculation}>{language === "zh-CN" ? "停止计算" : "Stop calculating"}</button> : <button onClick={() => void calculateSelectedFolderSize()}>{language === "zh-CN" ? "重新计算" : "Calculate again"}</button>}</> : <button onClick={() => void calculateSelectedFolderSize()}>{language === "zh-CN" ? "计算文件夹大小" : "Calculate folder size"}</button>}</div>}
       </aside>
       <section className={`content ${previewPaneOpen ? "with-preview-layout" : ""}`} style={{ "--modified-width": `${columnWidths.modified}px`, "--type-width": `${columnWidths.type}px`, "--size-width": `${columnWidths.size}px` } as React.CSSProperties}>
-        <div className="navigation"><button onClick={goBack} onContextMenu={(event) => openHistoryMenu("back", event)} title={text.historyHint} disabled={!activeTab || activeTab.historyIndex === 0}>←</button><button onClick={goForward} onContextMenu={(event) => openHistoryMenu("forward", event)} title={text.historyHint} disabled={!activeTab || activeTab.historyIndex >= activeTab.history.length - 1}>→</button><form className="address-form" onSubmit={submitAddress}>{addressEditing ? <><input ref={addressInputRef} autoFocus aria-label={text.address} value={address} onChange={(event) => { setAddress(event.target.value); setAddressSuggestionIndex(-1); }} onKeyDown={handleAddressKeyDown} onBlur={() => setAddressEditing(false)} placeholder={text.address} autoComplete="off" />{addressSuggestions.length > 0 && <div className="address-suggestions" role="listbox">{addressSuggestions.map((suggestion, index) => <button key={suggestion.path} type="button" role="option" aria-selected={index === addressSuggestionIndex} className={index === addressSuggestionIndex ? "active" : ""} onMouseDown={(event) => event.preventDefault()} onClick={() => chooseAddressSuggestion(suggestion)}><FolderGlyph /><span><strong>{suggestion.label}</strong><small>{suggestion.path}</small></span><i>{suggestion.source === "recent" ? (language === "zh-CN" ? "最近" : "Recent") : ""}</i></button>)}</div>}</> : <div className="breadcrumbs" title={`${text.editAddress} (Ctrl+L)`} onDoubleClick={beginAddressEditing}>{crumbs.map((crumb, index) => <span key={crumb.path}><button type="button" data-drop-path={crumb.path} className={dragTarget === crumb.path ? "drop-target" : ""} onClick={() => void browse(crumb.path)}>{crumb.label}</button>{index < crumbs.length - 1 && <i>›</i>}</span>)}<button type="button" className="edit-address" aria-label={text.editAddress} onClick={beginAddressEditing}>✎</button></div>}</form><div className="search-shell"><input className="search" value={query} onChange={(event) => changeSearchQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void startDeepSearch(); } }} placeholder={text.search} /><button className="search-run" aria-label={searching ? text.cancel : text.searchAll} title={searching ? text.cancel : text.searchAll} onClick={() => searching ? cancelDeepSearch() : void startDeepSearch()}>{searching ? "×" : "⌕"}</button><button className={`search-filter-button ${searchPanelOpen ? "active" : ""}`} aria-label={text.searchFilters} title={text.searchFilters} onClick={() => setSearchPanelOpen((open) => !open)}>≡</button>{searchPanelOpen && renderSearchPanel()}</div></div>
+        <div className="navigation"><button onClick={goBack} onContextMenu={(event) => openHistoryMenu("back", event)} title={text.historyHint} disabled={!activeTab || activeTab.historyIndex === 0}>←</button><button onClick={goForward} onContextMenu={(event) => openHistoryMenu("forward", event)} title={text.historyHint} disabled={!activeTab || activeTab.historyIndex >= activeTab.history.length - 1}>→</button><form className="address-form" onSubmit={submitAddress}>{addressEditing ? <><input ref={addressInputRef} autoFocus aria-label={text.address} value={address} onChange={(event) => { setAddress(event.target.value); setAddressSuggestionIndex(-1); }} onKeyDown={handleAddressKeyDown} onBlur={() => setAddressEditing(false)} placeholder={text.address} autoComplete="off" />{addressSuggestions.length > 0 && <div className="address-suggestions" role="listbox">{addressSuggestions.map((suggestion, index) => <button key={suggestion.path} type="button" role="option" aria-selected={index === addressSuggestionIndex} className={index === addressSuggestionIndex ? "active" : ""} onMouseDown={(event) => event.preventDefault()} onClick={() => chooseAddressSuggestion(suggestion)}><FolderGlyph /><span><strong>{suggestion.label}</strong><small>{suggestion.path}</small></span><i>{suggestion.source === "recent" ? (language === "zh-CN" ? "最近" : "Recent") : ""}</i></button>)}</div>}</> : <div className="breadcrumbs" title={`${text.editAddress} (Ctrl+L)`} onDoubleClick={beginAddressEditing} onContextMenu={(event) => listing && openPathContextMenu(listing.path, event)}>{crumbs.map((crumb, index) => <span key={crumb.path}><button type="button" data-drop-path={crumb.path} className={dragTarget === crumb.path ? "drop-target" : ""} onClick={() => void browse(crumb.path)} onContextMenu={(event) => openPathContextMenu(crumb.path, event)}>{crumb.label}</button>{index < crumbs.length - 1 && <i>›</i>}</span>)}<button type="button" className="edit-address" aria-label={text.editAddress} onClick={beginAddressEditing}>✎</button></div>}</form><div className="search-shell"><input className="search" value={query} onChange={(event) => changeSearchQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void startDeepSearch(); } }} placeholder={text.search} /><button className="search-run" aria-label={searching ? text.cancel : text.searchAll} title={searching ? text.cancel : text.searchAll} onClick={() => searching ? cancelDeepSearch() : void startDeepSearch()}>{searching ? "×" : "⌕"}</button><button className={`search-filter-button ${searchPanelOpen ? "active" : ""}`} aria-label={text.searchFilters} title={text.searchFilters} onClick={() => setSearchPanelOpen((open) => !open)}>≡</button>{searchPanelOpen && renderSearchPanel()}</div></div>
         <div className="content-heading">
-          <div className="content-identity"><div><h1>{currentLabel}</h1><span className="clean-path">{searchResults !== null ? `${listing?.path ?? ""}${query ? ` · ${query}` : ""}` : listing?.path ?? ""}</span></div>{searchResults !== null ? <button className="favorite-current" aria-label={text.backToFolder} title={text.backToFolder} onClick={clearDeepSearch}>×</button> : <button className={`favorite-current ${currentIsFavorite ? "active" : ""}`} aria-label={currentIsFavorite ? text.removeFavorite : text.addFavorite} title={currentIsFavorite ? text.removeFavorite : text.addFavorite} onClick={toggleFavoriteCurrent}>{currentIsFavorite ? "★" : "☆"}</button>}</div>
+          <div className="content-identity"><div><h1>{currentLabel}</h1><span className="clean-path" onContextMenu={(event) => listing && openPathContextMenu(listing.path, event)}>{searchResults !== null ? `${listing?.path ?? ""}${query ? ` · ${query}` : ""}` : listing?.path ?? ""}</span></div>{searchResults !== null ? <button className="favorite-current" aria-label={text.backToFolder} title={text.backToFolder} onClick={clearDeepSearch}>×</button> : <button className={`favorite-current ${currentIsFavorite ? "active" : ""}`} aria-label={currentIsFavorite ? text.removeFavorite : text.addFavorite} title={currentIsFavorite ? text.removeFavorite : text.addFavorite} onClick={toggleFavoriteCurrent}>{currentIsFavorite ? "★" : "☆"}</button>}</div>
           {unavailableLocation && unavailableCopy && unavailableLocation.path.toLocaleLowerCase() === listing?.path.toLocaleLowerCase() && <div className={`location-warning reason-${unavailableLocation.reason ?? "unknown"}`}><span><strong>{unavailableCopy.title}</strong><small>{unavailableCopy.detail}</small></span><button onClick={() => listing && void browse(listing.path, activeTabId, false)}>{language === "zh-CN" ? "立即重试" : "Retry"}</button><button onClick={() => { const home = locations.find((location) => location.label === "Home" && location.isAvailable); if (home) void browse(home.path); }}>{language === "zh-CN" ? "返回主页" : "Go home"}</button></div>}
           <div className="heading-actions"><div className="view-tools">
             <div className="menu-anchor"><button className="toolbar-control" aria-expanded={openMenu === "sort"} onClick={() => toggleToolbarMenu("sort")}><SortIcon /><span>{text.sort}</span><ChevronIcon /></button>{openMenu === "sort" && <div className="toolbar-menu sort-menu" role="menu">{(["name", "modified", "type", "size"] as SortKey[]).map((key) => <button key={key} className={sortKey === key ? "chosen" : ""} onClick={() => chooseSort(key)}><span>{key === "name" ? text.name : key === "modified" ? text.dateModified : key === "type" ? text.type : text.size}</span>{sortKey === key && <b>{sortDirection === "ascending" ? "↑" : "↓"}</b>}</button>)}</div>}</div>
@@ -3118,6 +3150,7 @@ function App() {
       <button onClick={() => { setContextMenu(null); void copySelection("copy"); }}><span>{text.copy}</span><kbd>Ctrl+C</kbd></button>
       <button onClick={() => { setContextMenu(null); void copySelection("move"); }}><span>{text.cut}</span><kbd>Ctrl+X</kbd></button>
       <button onClick={() => void copySelectionText("path")}><span>{text.copyPath}</span></button>
+      <button onClick={() => void copyPathsToClipboard([...selectedPaths], false)}><span>{text.copyPathAsText}</span></button>
       <button onClick={() => void copySelectionText("name")}><span>{text.copyName}</span></button>
       <button onClick={() => { setContextMenu(null); void pasteIntoCurrent(); }}><span>{text.paste}</span><kbd>Ctrl+V</kbd></button>
       <hr />
@@ -3135,6 +3168,9 @@ function App() {
       <button disabled={!selected || selectedPaths.size !== 1} onClick={() => { setContextMenu(null); void showSelectedProperties(); }}><span>{text.properties}</span><kbd>Alt+Enter</kbd></button>
     </ViewportContextMenu>}
     {contextMenu?.kind === "background" && <ViewportContextMenu x={contextMenu.x} y={contextMenu.y} onPointerDown={(event) => event.stopPropagation()}>
+      <button disabled={!listing} onClick={() => listing && void copyPathsToClipboard([listing.path], true)}><span>{text.copyPath}</span></button>
+      <button disabled={!listing} onClick={() => listing && void copyPathsToClipboard([listing.path], false)}><span>{text.copyPathAsText}</span></button>
+      <hr />
       <button onClick={() => void createItem("folder")}><span>{text.newFolder}</span></button>
       <button onClick={() => void createItem("text")}><span>{text.newTextFile}</span></button>
       <button onClick={() => void createItem("markdown")}><span>{text.newMarkdownFile}</span></button>
@@ -3143,6 +3179,10 @@ function App() {
       <button onClick={() => { setContextMenu(null); if (listing) void browse(listing.path, activeTabId, false); }}><span>{text.refresh}</span><kbd>F5</kbd></button>
       <button onClick={() => { setContextMenu(null); void openTerminalAt(); }}><span>{text.terminalHere}</span></button>
       <button onClick={() => { setContextMenu(null); void openTerminalAt(listing?.path, "claude"); }}><span>{text.claudeHere}</span><b>›_</b></button>
+    </ViewportContextMenu>}
+    {contextMenu?.kind === "path" && <ViewportContextMenu x={contextMenu.x} y={contextMenu.y} onPointerDown={(event) => event.stopPropagation()}>
+      <button onClick={() => void copyPathsToClipboard([contextMenu.path], true)}><span>{text.copyPath}</span></button>
+      <button onClick={() => void copyPathsToClipboard([contextMenu.path], false)}><span>{text.copyPathAsText}</span></button>
     </ViewportContextMenu>}
     {tabContextMenu && contextTab && <ViewportContextMenu x={tabContextMenu.x} y={tabContextMenu.y} className="tab-context-menu" onPointerDown={(event) => event.stopPropagation()}>
       <button onClick={() => toggleTabPinned(contextTab.id)}><span>{contextTab.pinned ? text.unpinTab : text.pinTab}</span><b>{contextTab.pinned ? "⌖" : ""}</b></button>
