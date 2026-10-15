@@ -53,6 +53,7 @@ import { SettingsDialog } from "./components/SettingsDialog";
 import { SearchPanel } from "./components/SearchPanel";
 import { SpaceHistoryCard } from "./components/SpaceHistoryCard";
 import { SpaceCapacityCard } from "./components/SpaceCapacityCard";
+import { SpaceRankings } from "./components/SpaceRankings";
 import { UI_COPY } from "./localization";
 import { useAppUpdater } from "./hooks/useAppUpdater";
 import { prioritizeQueuedTask, retryableTaskPaths, type TaskFilter } from "./lib/task-utils";
@@ -2932,8 +2933,6 @@ function App() {
     const drives = locations.filter((location) => /^[A-Za-z]:\\$/.test(location.path) && location.isAvailable);
     const result = spaceScanResult;
     const scanningSubdirectory = spaceScanRoot.toLocaleLowerCase() !== spaceScanDrive.toLocaleLowerCase();
-    const largestDirectorySize = Math.max(1, result?.largestDirectories[0]?.size ?? 1);
-    const largestFileSize = Math.max(1, result?.largestFiles[0]?.size ?? 1);
     const riskLabel = (risk: SpaceScanCategory["risk"]) => risk === "safe" ? text.safeToReview : risk === "review" ? text.confirmBeforeAction : text.protectedItem;
     const activeCategory = result?.categories.find((category) => category.id === spaceAdviceCategoryId) ?? null;
     const activeAdvice = activeCategory ? spaceCategoryAdvice(activeCategory.id, language) : null;
@@ -3014,10 +3013,7 @@ function App() {
                 </div>}
               </div>}
             </section>
-            <div className="space-ranking-grid">
-              <section className="space-ranking"><header><strong>{text.largeDirectories}</strong><span>{language === "zh-CN" ? "点击目录继续向下检查" : "Click a folder to drill down"}</span></header><div className="space-ranking-list">{result.largestDirectories.slice(0, 16).map((item) => <button key={item.path} title={language === "zh-CN" ? `继续检查 ${item.path}` : `Scan inside ${item.path}`} onClick={() => drillIntoSpaceDirectory(item)}><span className="space-rank-icon"><FolderGlyph /></span><span className="space-rank-copy"><strong>{item.name}</strong><small>{item.path}</small><i><b style={{ width: `${Math.max(2, item.size / largestDirectorySize * 100)}%` }} /></i></span><em>{formatSize(item.size)} <b>›</b></em></button>)}</div></section>
-              <section className="space-ranking"><header><strong>{text.largeFilesTitle}</strong><span>{language === "zh-CN" ? "点击可在 Flow Files 中定位" : "Click to locate in Flow Files"}</span></header><div className="space-ranking-list">{result.largestFiles.slice(0, 16).map((item) => <button key={item.path} title={`${text.openLocation}: ${item.path}`} onClick={() => void openSpaceScanItem(item)}><span className="space-rank-file">▤</span><span className="space-rank-copy"><strong>{item.name}</strong><small>{parentDirectory(item.path)}</small><i><b style={{ width: `${Math.max(2, item.size / largestFileSize * 100)}%` }} /></i></span><em>{formatSize(item.size)}</em></button>)}</div></section>
-            </div>
+            <SpaceRankings directories={result.largestDirectories} files={result.largestFiles} language={language} onOpenDirectory={drillIntoSpaceDirectory} onOpenFile={(item) => void openSpaceScanItem(item)} />
           </>}
         </div>
       </section>
