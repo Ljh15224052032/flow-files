@@ -2,6 +2,8 @@
 
 Flow Files 是一款面向 Windows 的轻量文件管理器，使用 Tauri 2、React、TypeScript 和 Rust 开发。项目最初用于比较 Tauri 与 Avalonia 的内存和开发成本，现在的主线已经转为可日常使用的 Tauri 应用。
 
+维护入口：[架构与模块边界](docs/ARCHITECTURE.md) · [路线图](ROADMAP.md) · [发布验收矩阵](docs/RELEASE_ACCEPTANCE.md)
+
 > 当前候选版本：`0.2.0`。项目仍处于早期开发阶段，暂不建议完全替代 Windows 资源管理器。
 
 ## 当前能力
