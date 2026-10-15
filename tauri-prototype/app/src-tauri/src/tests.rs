@@ -518,6 +518,43 @@ fn classifies_a_real_read_only_target_as_access_denied() {
     fs::remove_dir_all(&sandbox).expect("remove read-only-target test directory");
 }
 
+#[cfg(windows)]
+#[test]
+fn creates_lists_and_copies_a_real_extended_length_path() {
+    let sandbox = fresh_test_directory("long-path");
+    let source_root = sandbox.join("source");
+    let target_root = sandbox.join("copied");
+    let mut relative = PathBuf::new();
+    for index in 0..6 {
+        relative.push(format!("segment-{index}-{}", "x".repeat(40)));
+    }
+    let deep_source = source_root.join(&relative);
+    fs::create_dir_all(&deep_source).expect("create extended-length source tree");
+    let source_file = deep_source.join("payload.txt");
+    assert!(
+        source_file.to_string_lossy().len() > 260,
+        "test path must exceed the legacy Windows MAX_PATH boundary"
+    );
+    fs::write(&source_file, "long path payload").expect("write extended-length source file");
+
+    let listing = list_directory(deep_source.display().to_string())
+        .expect("list an extended-length directory through the production command");
+    assert_eq!(listing.file_count, 1);
+    assert!(listing
+        .entries
+        .iter()
+        .any(|entry| entry.name == "payload.txt"));
+
+    copy_path_plain(&source_root, &target_root).expect("copy extended-length directory tree");
+    let copied_file = target_root.join(&relative).join("payload.txt");
+    assert_eq!(
+        fs::read_to_string(&copied_file).expect("read copied extended-length file"),
+        "long path payload"
+    );
+
+    fs::remove_dir_all(&sandbox).expect("remove extended-length test directory");
+}
+
 #[test]
 fn rolls_back_partial_targets_on_injected_disk_full() {
     let sandbox = fresh_test_directory("disk-full-rollback");
