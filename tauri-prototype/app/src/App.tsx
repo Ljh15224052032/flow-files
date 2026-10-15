@@ -1391,8 +1391,9 @@ function App() {
   }
 
   function openBackgroundContextMenu(event: ReactMouseEvent<HTMLDivElement>) {
-    if (event.target instanceof Element && event.target.closest(".file-row")) return;
+    if (event.target instanceof Element && event.target.closest(".file-row, .preview-pane")) return;
     event.preventDefault();
+    event.stopPropagation();
     setSelected(null);
     setSelectedPaths(new Set());
     setSelectionAnchor(null);
@@ -3015,7 +3016,7 @@ function App() {
           </div></div>
         </div>
         <div className={`columns ${viewMode === "grid" ? "grid-hidden" : ""}`}><div className="column-heading"><button onClick={() => chooseSort("name")}>{text.name} {sortKey === "name" ? (sortDirection === "ascending" ? "↑" : "↓") : ""}</button></div><div className="column-heading"><span className="column-resizer" role="separator" aria-orientation="vertical" title={language === "zh-CN" ? "拖动调整列宽；双击重置" : "Drag to resize; double-click to reset"} onPointerDown={(event) => beginColumnResize("modified", event)} onDoubleClick={(event) => resetColumnWidth("modified", event)} /><button onClick={() => chooseSort("modified")}>{text.modified} {sortKey === "modified" ? (sortDirection === "ascending" ? "↑" : "↓") : ""}</button></div><div className="column-heading"><span className="column-resizer" role="separator" aria-orientation="vertical" title={language === "zh-CN" ? "拖动调整列宽；双击重置" : "Drag to resize; double-click to reset"} onPointerDown={(event) => beginColumnResize("type", event)} onDoubleClick={(event) => resetColumnWidth("type", event)} /><button onClick={() => chooseSort("type")}>{text.type} {sortKey === "type" ? (sortDirection === "ascending" ? "↑" : "↓") : ""}</button></div><div className="column-heading"><span className="column-resizer" role="separator" aria-orientation="vertical" title={language === "zh-CN" ? "拖动调整列宽；双击重置" : "Drag to resize; double-click to reset"} onPointerDown={(event) => beginColumnResize("size", event)} onDoubleClick={(event) => resetColumnWidth("size", event)} /><button onClick={() => chooseSort("size")}>{text.size} {sortKey === "size" ? (sortDirection === "ascending" ? "↑" : "↓") : ""}</button></div></div>
-        <div className={`browser-stage ${previewPaneOpen ? "with-preview" : ""}`}><div ref={fileListRef} role="listbox" aria-multiselectable="true" tabIndex={0} data-drop-path={listing?.path} className={`file-list view-${viewMode} ${dragTarget === listing?.path ? "drop-target" : ""}`} onScroll={(event: UIEvent<HTMLDivElement>) => setScrollTop(event.currentTarget.scrollTop)} onContextMenu={openBackgroundContextMenu} onPointerDown={beginMarqueeSelection} onPointerMove={updateMarqueeSelection} onPointerUp={finishMarqueeSelection} onPointerCancel={finishMarqueeSelection}>
+        <div className={`browser-stage ${previewPaneOpen ? "with-preview" : ""}`} onContextMenu={openBackgroundContextMenu}><div ref={fileListRef} role="listbox" aria-multiselectable="true" tabIndex={0} data-drop-path={listing?.path} className={`file-list view-${viewMode} ${dragTarget === listing?.path ? "drop-target" : ""}`} onScroll={(event: UIEvent<HTMLDivElement>) => setScrollTop(event.currentTarget.scrollTop)} onContextMenu={openBackgroundContextMenu} onPointerDown={beginMarqueeSelection} onPointerMove={updateMarqueeSelection} onPointerUp={finishMarqueeSelection} onPointerCancel={finishMarqueeSelection}>
           <div style={{ height: virtualHeight, position: "relative" }}><div className="entries-window" style={{ transform: `translateY(${firstVisibleRow * rowHeight}px)`, gridTemplateColumns: viewMode === "grid" ? `repeat(${gridColumns}, minmax(0, 1fr))` : undefined }}>{visibleEntries.map((entry, localIndex) => {
             const thumbnail = thumbnailCache[entry.path];
             const nativeIcon = fileIconCache[entry.path];
@@ -3168,8 +3169,8 @@ function App() {
       <button disabled={!selected || selectedPaths.size !== 1} onClick={() => { setContextMenu(null); void showSelectedProperties(); }}><span>{text.properties}</span><kbd>Alt+Enter</kbd></button>
     </ViewportContextMenu>}
     {contextMenu?.kind === "background" && <ViewportContextMenu x={contextMenu.x} y={contextMenu.y} onPointerDown={(event) => event.stopPropagation()}>
-      <button disabled={!listing} onClick={() => listing && void copyPathsToClipboard([listing.path], true)}><span>{text.copyPath}</span></button>
-      <button disabled={!listing} onClick={() => listing && void copyPathsToClipboard([listing.path], false)}><span>{text.copyPathAsText}</span></button>
+      <button disabled={!listing} onClick={() => listing && void copyPathsToClipboard([listing.path], true)}><span>{text.copyCurrentPath}</span></button>
+      <button disabled={!listing} onClick={() => listing && void copyPathsToClipboard([listing.path], false)}><span>{text.copyCurrentPathAsText}</span></button>
       <hr />
       <button onClick={() => void createItem("folder")}><span>{text.newFolder}</span></button>
       <button onClick={() => void createItem("text")}><span>{text.newTextFile}</span></button>
