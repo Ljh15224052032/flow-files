@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SpaceScanSnapshot } from "../types";
-import { visibleSpaceHistory } from "./space-history";
+import { spaceCapacitySummary, visibleSpaceHistory } from "./space-history";
 
 function snapshot(capturedAt: number, availableSpace: number, totalSpace = 100): SpaceScanSnapshot {
   return { root: "C:\\", capturedAt, availableSpace, totalSpace, scannedBytes: 0, categories: {} };
@@ -19,5 +19,11 @@ describe("disk space history", () => {
     expect(visibleSpaceHistory([snapshot(1, -50)])[0].usedPercent).toBe(100);
     expect(visibleSpaceHistory([snapshot(1, 200)])[0].usedPercent).toBe(0);
     expect(visibleSpaceHistory([snapshot(1, 0, 0)])[0].usedPercent).toBe(0);
+  });
+
+  it("summarizes current capacity and its change from the previous scan", () => {
+    const result = { root: "C:\\", totalSpace: 100, availableSpace: 30, scannedBytes: 50, scannedFiles: 2, scannedFolders: 1, issues: 0, skippedReparsePoints: 0, cancelled: false, largestFiles: [], largestDirectories: [], categories: [] };
+    expect(spaceCapacitySummary(result, snapshot(1, 40))).toEqual({ usedBytes: 70, usedPercent: 70, availableDelta: -10 });
+    expect(spaceCapacitySummary({ ...result, availableSpace: 150 }, null)).toEqual({ usedBytes: 0, usedPercent: 0, availableDelta: null });
   });
 });

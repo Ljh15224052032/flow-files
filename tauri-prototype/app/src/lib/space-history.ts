@@ -1,10 +1,22 @@
-import type { SpaceScanSnapshot } from "../types";
+import type { SpaceScanResult, SpaceScanSnapshot } from "../types";
 
 export type SpaceHistoryPoint = {
   snapshot: SpaceScanSnapshot;
   availableDelta: number | null;
   usedPercent: number;
 };
+
+export function spaceCapacitySummary(result: SpaceScanResult, previous: SpaceScanSnapshot | null) {
+  const usedBytes = Math.max(0, result.totalSpace - result.availableSpace);
+  const usedPercent = result.totalSpace
+    ? Math.max(0, Math.min(100, usedBytes / result.totalSpace * 100))
+    : 0;
+  return {
+    usedBytes,
+    usedPercent,
+    availableDelta: previous ? result.availableSpace - previous.availableSpace : null,
+  };
+}
 
 export function visibleSpaceHistory(history: SpaceScanSnapshot[], limit = 6): SpaceHistoryPoint[] {
   const safeLimit = Math.max(1, Math.floor(limit));

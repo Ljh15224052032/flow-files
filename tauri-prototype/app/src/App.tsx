@@ -52,6 +52,7 @@ import { StatusBar } from "./components/StatusBar";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { SearchPanel } from "./components/SearchPanel";
 import { SpaceHistoryCard } from "./components/SpaceHistoryCard";
+import { SpaceCapacityCard } from "./components/SpaceCapacityCard";
 import { UI_COPY } from "./localization";
 import { useAppUpdater } from "./hooks/useAppUpdater";
 import { prioritizeQueuedTask, retryableTaskPaths, type TaskFilter } from "./lib/task-utils";
@@ -2930,9 +2931,6 @@ function App() {
   function renderSpaceHealth() {
     const drives = locations.filter((location) => /^[A-Za-z]:\\$/.test(location.path) && location.isAvailable);
     const result = spaceScanResult;
-    const usedBytes = result ? Math.max(0, result.totalSpace - result.availableSpace) : 0;
-    const usedPercent = result?.totalSpace ? Math.min(100, usedBytes / result.totalSpace * 100) : 0;
-    const availableDelta = result && spacePreviousSnapshot ? result.availableSpace - spacePreviousSnapshot.availableSpace : null;
     const scanningSubdirectory = spaceScanRoot.toLocaleLowerCase() !== spaceScanDrive.toLocaleLowerCase();
     const largestDirectorySize = Math.max(1, result?.largestDirectories[0]?.size ?? 1);
     const largestFileSize = Math.max(1, result?.largestFiles[0]?.size ?? 1);
@@ -2964,12 +2962,7 @@ function App() {
           {spaceScanError && <div className="space-scan-error"><strong>{language === "zh-CN" ? "扫描未完成" : "Scan did not finish"}</strong><span>{spaceScanError}</span></div>}
           {!result && !spaceScanning && !spaceScanError && <div className="space-health-empty"><SpaceHealthIcon /><strong>{text.noScanYet}</strong><span>{text.scanCoverageHint}</span></div>}
           {result && <>
-            <section className="space-capacity-card">
-              <div className="space-capacity-heading"><div><strong>{result.root}</strong><span>{formatSize(result.availableSpace)} {text.available} / {formatSize(result.totalSpace)}</span></div><b>{Math.round(usedPercent)}%</b></div>
-              <div className="space-capacity-track"><i style={{ width: `${usedPercent}%` }} /></div>
-              <div className={`space-summary-grid ${availableDelta !== null ? "with-comparison" : ""}`}><article><span>{language === "zh-CN" ? "磁盘已用" : "Disk used"}</span><strong>{formatSize(usedBytes)}</strong></article><article><span>{text.scanCaptured}</span><strong>{formatSize(result.scannedBytes)}</strong><small>{result.scannedFiles.toLocaleString()} {language === "zh-CN" ? "个文件" : "files"}</small></article><article><span>{text.inaccessible}</span><strong>{result.issues.toLocaleString()}</strong><small>{result.skippedReparsePoints.toLocaleString()} {language === "zh-CN" ? "个联接/占位点已跳过" : "junctions/placeholders skipped"}</small></article>{availableDelta !== null && <article className={availableDelta >= 0 ? "space-change-positive" : "space-change-negative"}><span>{language === "zh-CN" ? "距上次体检" : "Since last scan"}</span><strong>{availableDelta >= 0 ? "+" : "−"}{formatSize(Math.abs(availableDelta))}</strong><small>{availableDelta >= 0 ? (language === "zh-CN" ? "可用空间增加" : "more free space") : (language === "zh-CN" ? "可用空间减少" : "less free space")}</small></article>}</div>
-              <p>{text.scanCoverageHint}{result.cancelled ? ` · ${language === "zh-CN" ? "本次扫描已提前停止，当前显示部分结果。" : "This scan was stopped early; partial results are shown."}` : ""}</p>
-            </section>
+            <SpaceCapacityCard result={result} previous={spacePreviousSnapshot} language={language} />
             <SpaceHistoryCard history={spaceSnapshotHistory} language={language} availableLabel={text.available} />
             <section className="duplicate-diagnostic">
               <header><div><strong>{language === "zh-CN" ? "重复文件诊断" : "Duplicate file diagnosis"}</strong><span>{language === "zh-CN" ? "仅检查 1 MB 以上文件；完整哈希确认，不会自动选择或删除" : "Files over 1 MB only; full-hash verification with no automatic selection or deletion"}</span></div>{duplicateScanning ? <button className="secondary" onClick={cancelDuplicateScan}>{text.stopScan}</button> : <button disabled={spaceScanning} onClick={() => void startDuplicateScan()}>{duplicateResult ? (language === "zh-CN" ? "重新查重" : "Scan again") : (language === "zh-CN" ? "开始查重" : "Find duplicates")}</button>}</header>
