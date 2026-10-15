@@ -1076,6 +1076,50 @@ fn remove_path(path: &Path) -> Result<(), String> {
     }
 }
 
+fn finalize_path_operation(
+    target: &Path,
+    backup: Option<&Path>,
+    operation: Result<(), String>,
+) -> Result<bool, String> {
+    match operation {
+        Ok(()) => {
+            if let Some(backup) = backup {
+                let _ = remove_path(backup);
+                Ok(true)
+            } else {
+                Ok(false)
+            }
+        }
+        Err(operation_error) => {
+            let mut rollback_errors = Vec::new();
+            if target.exists() {
+                if let Err(error) = remove_path(target) {
+                    rollback_errors.push(format!(
+                        "could not remove partial target {}: {error}",
+                        public_path(target)
+                    ));
+                }
+            }
+            if let Some(backup) = backup {
+                if let Err(error) = fs::rename(backup, target) {
+                    rollback_errors.push(format!(
+                        "could not restore backup {}: {error}",
+                        public_path(backup)
+                    ));
+                }
+            }
+            if rollback_errors.is_empty() {
+                Err(operation_error)
+            } else {
+                Err(format!(
+                    "{operation_error} Rollback warning: {}",
+                    rollback_errors.join("; ")
+                ))
+            }
+        }
+    }
+}
+
 struct ScanContext {
     app: tauri::AppHandle,
     job_id: String,
@@ -4084,12 +4128,9 @@ async fn run_file_operation(
                 copy_path_with_progress(&source, &target, &mut progress)
             };
 
-            match operation {
-                Ok(()) => {
-                    if let Some(backup) = backup {
-                        replaced_existing = true;
-                        let _ = remove_path(&backup);
-                    }
+            match finalize_path_operation(&target, backup.as_deref(), operation) {
+                Ok(replaced) => {
+                    replaced_existing |= replaced;
                     completed_targets.push(public_path(&target));
                     if mode == "move" {
                         move_pairs.push(PathPair {
@@ -4101,10 +4142,6 @@ async fn run_file_operation(
                     progress.emit();
                 }
                 Err(error) => {
-                    let _ = remove_path(&target);
-                    if let Some(backup) = backup {
-                        let _ = fs::rename(backup, &target);
-                    }
                     if error != "Operation cancelled." {
                         issues.push(operation_issue(&source, error));
                         skipped += 1;

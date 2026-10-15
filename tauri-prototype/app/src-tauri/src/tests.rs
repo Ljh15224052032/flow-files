@@ -484,6 +484,52 @@ fn classifies_a_real_windows_file_lock_as_in_use() {
 }
 
 #[test]
+fn rolls_back_partial_targets_on_injected_disk_full() {
+    let sandbox = fresh_test_directory("disk-full-rollback");
+    let target = sandbox.join("report.txt");
+    let backup = sandbox.join(".flow-backup-test-report");
+    fs::write(&target, "original content").expect("create original target");
+    fs::rename(&target, &backup).expect("stage original target backup");
+    fs::write(&target, "partial replacement").expect("create partial replacement");
+
+    let error = finalize_path_operation(
+        &target,
+        Some(&backup),
+        Err(app_error(
+            "There is not enough space on the disk (os error 112)",
+        )),
+    )
+    .expect_err("injected disk-full failure must be returned");
+
+    assert_eq!(classify_operation_issue(&error), "diskFull");
+    assert_eq!(
+        fs::read_to_string(&target).expect("restored original target"),
+        "original content"
+    );
+    assert!(
+        !backup.exists(),
+        "successful rollback must consume its backup"
+    );
+
+    let new_target = sandbox.join("new-copy.bin");
+    fs::write(&new_target, "partial new copy").expect("create partial new copy");
+    finalize_path_operation(
+        &new_target,
+        None,
+        Err(app_error(
+            "There is not enough space on the disk (os error 112)",
+        )),
+    )
+    .expect_err("new-copy failure must be returned");
+    assert!(
+        !new_target.exists(),
+        "a failed new copy must not leave a partial file"
+    );
+
+    fs::remove_dir_all(&sandbox).expect("remove disk-full rollback test directory");
+}
+
+#[test]
 fn creates_extracts_zip_and_batch_renames_transactionally() {
     let sandbox = env::temp_dir().join(format!(
         "flow-file-manager-archive-test-{}",
